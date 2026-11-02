@@ -42,7 +42,7 @@ export const StokKeluarPenjualanView: React.FC<StokKeluarPenjualanViewProps> = (
   transactions,
   onRefreshData,
 }) => {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, openLoginModal } = useAuth();
   const { showToast } = useToast();
 
   const [transactionDate, setTransactionDate] = useState<string>(getTodayWIB());
@@ -199,11 +199,7 @@ export const StokKeluarPenjualanView: React.FC<StokKeluarPenjualanViewProps> = (
     if (!analysis.canConfirm || !file) return;
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk mengimpor transaksi penjualan.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
 

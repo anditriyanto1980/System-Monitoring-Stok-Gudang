@@ -32,7 +32,7 @@ export const StokOpnameView: React.FC<StokOpnameViewProps> = ({
   opnames,
   onRefreshData,
 }) => {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, openLoginModal } = useAuth();
   const { showToast } = useToast();
 
   const [date, setDate] = useState<string>(getTodayWIB());
@@ -133,11 +133,7 @@ export const StokOpnameView: React.FC<StokOpnameViewProps> = ({
   const handleSaveDraft = async () => {
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk menyimpan draft opname.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
     try {
@@ -163,11 +159,7 @@ export const StokOpnameView: React.FC<StokOpnameViewProps> = ({
   const handleConfirmAdjustment = async () => {
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk menyesuaikan stok fisik.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
     try {

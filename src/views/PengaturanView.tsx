@@ -35,7 +35,7 @@ export const PengaturanView: React.FC<PengaturanViewProps> = ({
   mappings,
   onRefreshData,
 }) => {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, openLoginModal } = useAuth();
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState<'MAPPING' | 'AUDIT' | 'TEMPLATES'>('MAPPING');
@@ -68,11 +68,7 @@ export const PengaturanView: React.FC<PengaturanViewProps> = ({
     e.preventDefault();
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk menambah pemetaan alias.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
 
@@ -110,11 +106,7 @@ export const PengaturanView: React.FC<PengaturanViewProps> = ({
   const handleDeleteMapping = async (id: string, name: string) => {
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk menghapus pemetaan.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
     try {

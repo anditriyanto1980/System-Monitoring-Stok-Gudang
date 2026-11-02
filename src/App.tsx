@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider, useToast } from './components/NotificationToast';
 import { Header } from './components/Header';
 import { Sidebar, NavTab } from './components/Sidebar';
+import { LoginModal } from './components/LoginModal';
 import {
   Product,
   StockTransaction,
@@ -217,6 +218,7 @@ export default function App() {
     <AuthProvider>
       <ToastProvider>
         <WarehouseApp />
+        <LoginModal />
       </ToastProvider>
     </AuthProvider>
   );

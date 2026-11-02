@@ -50,7 +50,7 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
   transactions,
   onRefreshData,
 }) => {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, openLoginModal } = useAuth();
   const { showToast } = useToast();
 
   const [platform, setPlatform] = useState<'SHOPEE' | 'TIKTOK'>('SHOPEE');
@@ -244,11 +244,7 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
     if (!targetProductId) return;
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk menyimpan pemetaan.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
     const targetProd = products.find((p) => p.id === targetProductId);
@@ -274,11 +270,7 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
     if (!analysis.canConfirm || !file) return;
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk mengonfirmasi pemotongan stok.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
 

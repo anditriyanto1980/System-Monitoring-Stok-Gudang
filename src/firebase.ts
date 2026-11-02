@@ -1,12 +1,40 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signOut,
+  setPersistence,
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  browserSessionPersistence,
+} from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+
+// Configure Google Auth Provider
 export const googleProvider = new GoogleAuthProvider();
+// Force account selection so users on shared mobile devices or laptops can switch accounts cleanly
+googleProvider.setCustomParameters({
+  prompt: 'select_account',
+});
+
+// Configure robust persistence across all devices (Mobile Safari, Android Chrome, Desktop, PWA)
+if (typeof window !== 'undefined') {
+  setPersistence(auth, browserLocalPersistence).catch((err) => {
+    console.warn('browserLocalPersistence failed, attempting indexedDBLocalPersistence:', err);
+    setPersistence(auth, indexedDBLocalPersistence).catch((fallbackErr) => {
+      console.warn('indexedDBLocalPersistence failed, falling back to session:', fallbackErr);
+      setPersistence(auth, browserSessionPersistence).catch(() => {});
+    });
+  });
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -67,4 +95,9 @@ export async function testConnection() {
 }
 testConnection();
 
-export { signInWithPopup, signOut };
+export {
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signOut,
+};

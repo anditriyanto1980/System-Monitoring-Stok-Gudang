@@ -41,7 +41,7 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
   products,
   onRefreshData,
 }) => {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, openLoginModal } = useAuth();
   const { showToast } = useToast();
 
   const [search, setSearch] = useState('');
@@ -153,7 +153,7 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
     if (selectedIds.size === 0) return;
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk menghapus barang.');
-      signInWithGoogle().catch(() => {});
+      openLoginModal();
       return;
     }
     setDeleteTarget('SELECTED');
@@ -166,7 +166,7 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
     if (products.length === 0) return;
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk menghapus barang.');
-      signInWithGoogle().catch(() => {});
+      openLoginModal();
       return;
     }
     setDeleteTarget('ALL');
@@ -178,7 +178,7 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
   const handleTriggerDeleteSingle = (p: Product) => {
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk menghapus barang.');
-      signInWithGoogle().catch(() => {});
+      openLoginModal();
       return;
     }
     setDeleteTarget(p.id);
@@ -238,11 +238,7 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
     e.preventDefault();
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk menambah barang.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
 
@@ -278,11 +274,7 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
     if (!editingProduct) return;
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk mengedit barang.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
     if (!editName.trim()) {
@@ -312,11 +304,7 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
   const handleToggleActive = async (p: Product) => {
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk mengubah status barang.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
     try {
@@ -374,11 +362,7 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
     if (parsedRows.length === 0) return;
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk mengimpor master barang.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
 

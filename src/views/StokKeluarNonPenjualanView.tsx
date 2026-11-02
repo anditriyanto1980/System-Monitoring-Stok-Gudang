@@ -32,7 +32,7 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
   transactions,
   onRefreshData,
 }) => {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, openLoginModal } = useAuth();
   const { showToast } = useToast();
 
   const [date, setDate] = useState<string>(getTodayWIB());
@@ -105,11 +105,7 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
 
     if (!user) {
       showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk memproses pengeluaran non-penjualan.');
-      try {
-        await signInWithGoogle();
-      } catch {
-        return;
-      }
+      openLoginModal();
       return;
     }
 
