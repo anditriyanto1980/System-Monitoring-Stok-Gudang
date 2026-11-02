@@ -19,6 +19,7 @@ interface StokMasukViewProps {
   products: Product[];
   transactions: StockTransaction[];
   onRefreshData: () => Promise<void>;
+  initialProductId?: string | null;
 }
 
 interface ItemEntry {
@@ -30,6 +31,7 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
   products,
   transactions,
   onRefreshData,
+  initialProductId,
 }) => {
   const { user, openLoginModal } = useAuth();
   const { showToast } = useToast();
@@ -38,8 +40,21 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
   const [type, setType] = useState<'MASUK' | 'RETUR'>('MASUK');
   const [referenceNo, setReferenceNo] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
-  const [items, setItems] = useState<ItemEntry[]>([{ productId: '', qty: 1 }]);
+  const [items, setItems] = useState<ItemEntry[]>(() => {
+    if (initialProductId) {
+      return [{ productId: initialProductId, qty: 10 }];
+    }
+    return [{ productId: '', qty: 1 }];
+  });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Update selected product if initialProductId changes
+  React.useEffect(() => {
+    if (initialProductId) {
+      setItems([{ productId: initialProductId, qty: 10 }]);
+      showToast('info', 'Barang Dipilih', 'Barang telah dipilih otomatis untuk pencatatan stok masuk');
+    }
+  }, [initialProductId]);
 
   // Filter history
   const [searchHistory, setSearchHistory] = useState<string>('');

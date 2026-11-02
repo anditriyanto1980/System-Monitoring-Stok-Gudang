@@ -38,6 +38,7 @@ function WarehouseApp() {
 
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [isOpenMobile, setIsOpenMobile] = useState<boolean>(false);
+  const [restockProductId, setRestockProductId] = useState<string | null>(null);
 
   // Core Data
   const [products, setProducts] = useState<Product[]>([]);
@@ -115,6 +116,11 @@ function WarehouseApp() {
           <Header
             onToggleSidebar={() => setIsOpenMobile((prev) => !prev)}
             activeTabTitle={tabTitles[currentTab]}
+            products={products}
+            onNavigateToRestock={(pId) => {
+              setRestockProductId(pId);
+              setCurrentTab('stok-masuk');
+            }}
           />
 
           <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto">
@@ -143,6 +149,7 @@ function WarehouseApp() {
                     products={products}
                     transactions={transactions}
                     onRefreshData={loadData}
+                    initialProductId={restockProductId}
                   />
                 )}
 
