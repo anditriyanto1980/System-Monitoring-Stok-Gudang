@@ -214,6 +214,13 @@ function WarehouseApp() {
               </>
             )}
           </main>
+
+          {/* Footer branding */}
+          <footer className="mt-auto py-3.5 px-4 md:px-8 border-t border-slate-200/80 bg-white/70 backdrop-blur-xs text-center">
+            <p className="text-xs text-slate-500 font-medium">
+              SISTEM MONITORING STOK GUDANG &bull; Powered By : <span className="font-semibold text-slate-800">AT Digital Studio</span>
+            </p>
+          </footer>
         </div>
       </div>
     </div>

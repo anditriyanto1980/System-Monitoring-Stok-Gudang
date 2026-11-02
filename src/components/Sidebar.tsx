@@ -250,6 +250,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
             <span className="truncate">Database Cloud Firestore Real-time</span>
           </div>
+
+          {/* Powered by footer branding */}
+          <div className="mt-2.5 pt-2.5 border-t border-slate-200/80 text-center">
+            <p className="text-[11px] text-slate-500 font-medium tracking-tight">
+              Powered By : <span className="font-bold text-slate-800">AT Digital Studio</span>
+            </p>
+          </div>
         </div>
       </aside>
     </>
