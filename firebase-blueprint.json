@@ -1,0 +1,113 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Master data for warehouse inventory items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "normalizedName": { "type": "string", "maxLength": 200 },
+        "currentStock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "normalizedName", "currentStock", "isActive"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Stock movement record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "productId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 200 },
+        "type": { "type": "string", "maxLength": 64 },
+        "qty": { "type": "number" },
+        "direction": { "type": "string", "maxLength": 16 },
+        "balanceAfter": { "type": "number" },
+        "date": { "type": "string", "maxLength": 32 },
+        "referenceNo": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "source": { "type": "string", "maxLength": 64 },
+        "batchId": { "type": "string", "maxLength": 128 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "productId", "productName", "type", "qty", "direction", "balanceAfter", "date", "source"]
+    },
+    "ProductMapping": {
+      "title": "ProductMapping",
+      "description": "Mapping for Shopee and TikTok product titles to master item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "marketplace": { "type": "string", "maxLength": 32 },
+        "rawName": { "type": "string", "maxLength": 250 },
+        "normalizedRawName": { "type": "string", "maxLength": 250 },
+        "targetProductId": { "type": "string", "maxLength": 128 },
+        "targetProductName": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "marketplace", "rawName", "normalizedRawName", "targetProductId", "targetProductName"]
+    },
+    "ImportBatch": {
+      "title": "ImportBatch",
+      "description": "Record of bulk uploads to track batches and prevent duplicate uploads",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "platform": { "type": "string", "maxLength": 64 },
+        "transactionDate": { "type": "string", "maxLength": 32 },
+        "importedAt": { "type": "string", "maxLength": 64 },
+        "itemCount": { "type": "number" },
+        "totalQty": { "type": "number" },
+        "status": { "type": "string", "maxLength": 32 },
+        "fileName": { "type": "string", "maxLength": 250 },
+        "fileHash": { "type": "string", "maxLength": 128 },
+        "createdBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "platform", "transactionDate", "importedAt", "itemCount", "totalQty", "status"]
+    },
+    "StockOpname": {
+      "title": "StockOpname",
+      "description": "Stock count session and reconciliation record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "maxLength": 32 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "totalDifference": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "date", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Warehouse product catalog and current stock levels"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Audit trail of every stock in/out/adjustment"
+    },
+    "/product_mappings/{mappingId}": {
+      "schema": "ProductMapping",
+      "description": "Aliases mapping marketplace titles to warehouse items"
+    },
+    "/import_batches/{batchId}": {
+      "schema": "ImportBatch",
+      "description": "Imported file batch log"
+    },
+    "/stock_opname/{opnameId}": {
+      "schema": "StockOpname",
+      "description": "Stock opname sessions and reconciliation"
+    }
+  }
+}

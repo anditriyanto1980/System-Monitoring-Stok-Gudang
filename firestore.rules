@@ -1,0 +1,103 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['id', 'name', 'normalizedName', 'currentStock', 'isActive'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && data.normalizedName is string && data.normalizedName.size() > 0 && data.normalizedName.size() <= 200
+        && data.currentStock is number
+        && data.isActive is bool;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['id', 'productId', 'productName', 'type', 'qty', 'direction', 'balanceAfter', 'date', 'source'])
+        && data.id is string && data.id.size() <= 128
+        && data.productId is string && data.productId.size() <= 128
+        && data.productName is string && data.productName.size() <= 200
+        && data.type is string && data.type.size() <= 64
+        && data.qty is number && data.qty >= 0
+        && data.direction is string && data.direction.size() <= 16
+        && data.balanceAfter is number
+        && data.date is string && data.date.size() <= 32
+        && data.source is string && data.source.size() <= 64;
+    }
+
+    function isValidProductMapping(data) {
+      return data.keys().hasAll(['id', 'marketplace', 'rawName', 'normalizedRawName', 'targetProductId', 'targetProductName'])
+        && data.id is string && data.id.size() <= 128
+        && data.marketplace is string && data.marketplace.size() <= 32
+        && data.rawName is string && data.rawName.size() <= 250
+        && data.normalizedRawName is string && data.normalizedRawName.size() <= 250
+        && data.targetProductId is string && data.targetProductId.size() <= 128
+        && data.targetProductName is string && data.targetProductName.size() <= 200;
+    }
+
+    function isValidImportBatch(data) {
+      return data.keys().hasAll(['id', 'platform', 'transactionDate', 'importedAt', 'itemCount', 'totalQty', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.platform is string && data.platform.size() <= 64
+        && data.transactionDate is string && data.transactionDate.size() <= 32
+        && data.importedAt is string && data.importedAt.size() <= 64
+        && data.itemCount is number
+        && data.totalQty is number
+        && data.status is string && data.status.size() <= 32;
+    }
+
+    function isValidStockOpname(data) {
+      return data.keys().hasAll(['id', 'date', 'status', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.date is string && data.date.size() <= 32
+        && data.status is string && data.status.size() <= 32
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    match /products/{productId} {
+      allow get, list: if true;
+      allow create: if isSignedIn() && isValidId(productId) && isValidProduct(request.resource.data);
+      allow update: if isSignedIn() && isValidId(productId) && isValidProduct(request.resource.data);
+      allow delete: if isSignedIn();
+    }
+
+    match /transactions/{transactionId} {
+      allow get, list: if true;
+      allow create: if isSignedIn() && isValidId(transactionId) && isValidTransaction(request.resource.data);
+      allow update: if isSignedIn() && isValidId(transactionId) && isValidTransaction(request.resource.data);
+      allow delete: if isSignedIn();
+    }
+
+    match /product_mappings/{mappingId} {
+      allow get, list: if true;
+      allow create: if isSignedIn() && isValidId(mappingId) && isValidProductMapping(request.resource.data);
+      allow update: if isSignedIn() && isValidId(mappingId) && isValidProductMapping(request.resource.data);
+      allow delete: if isSignedIn();
+    }
+
+    match /import_batches/{batchId} {
+      allow get, list: if true;
+      allow create: if isSignedIn() && isValidId(batchId) && isValidImportBatch(request.resource.data);
+      allow update: if isSignedIn() && isValidId(batchId) && isValidImportBatch(request.resource.data);
+      allow delete: if isSignedIn();
+    }
+
+    match /stock_opname/{opnameId} {
+      allow get, list: if true;
+      allow create: if isSignedIn() && isValidId(opnameId) && isValidStockOpname(request.resource.data);
+      allow update: if isSignedIn() && isValidId(opnameId) && isValidStockOpname(request.resource.data);
+      allow delete: if isSignedIn();
+    }
+  }
+}

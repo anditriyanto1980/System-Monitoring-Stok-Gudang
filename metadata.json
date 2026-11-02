@@ -1,0 +1,6 @@
+{
+  "name": "Sistem Monitoring Stok Gudang",
+  "description": "Aplikasi monitoring dan kontrol pergerakan persediaan stok gudang terpusat (stok masuk, keluar non-penjualan, penjualan Shopee, TikTok Shop, penjualan lainnya, dan stok opname).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
