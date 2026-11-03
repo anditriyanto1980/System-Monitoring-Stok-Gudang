@@ -10,6 +10,8 @@ import {
   saveProductMapping,
   normalizeText,
   checkPotentialDuplicateBatch,
+  deleteMarketplaceDailyReportByDate,
+  deleteSingleImportBatch,
 } from '../services/inventoryService';
 import {
   parseExcelOrCsv,
@@ -33,6 +35,11 @@ import {
   Save,
   Check,
   RefreshCw,
+  Trash2,
+  CalendarX,
+  RotateCcw,
+  Loader2,
+  X,
 } from 'lucide-react';
 
 interface StokKeluarMarketplaceViewProps {
@@ -62,6 +69,13 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
 
   // Quick inline mapping state for unmatched products: { [rawName]: targetProductId }
   const [inlineMappings, setInlineMappings] = useState<Record<string, string>>({});
+
+  // Delete Daily Report States
+  const [deleteDate, setDeleteDate] = useState<string>(getTodayWIB());
+  const [deletePlatformFilter, setDeletePlatformFilter] = useState<'ALL' | 'SHOPEE' | 'TIKTOK'>('ALL');
+  const [isDeletingReport, setIsDeletingReport] = useState<boolean>(false);
+  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+  const [batchToDelete, setBatchToDelete] = useState<ImportBatch | null>(null);
 
   // Active platform batches
   const platformBatches = useMemo(() => {
@@ -306,6 +320,72 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
       showToast('error', 'Gagal Memproses Import', err?.message || 'Terjadi kesalahan sistem.');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // Batches matching the selected delete date and delete platform filter
+  const batchesOnDeleteDate = useMemo(() => {
+    return batches.filter((b) => {
+      const matchDate = b.transactionDate === deleteDate;
+      const isMarketplace = b.platform === 'SHOPEE' || b.platform === 'TIKTOK';
+      if (!matchDate || !isMarketplace) return false;
+      if (deletePlatformFilter === 'ALL') return true;
+      return b.platform === deletePlatformFilter;
+    });
+  }, [batches, deleteDate, deletePlatformFilter]);
+
+  const totalQtyOnDeleteDate = useMemo(() => {
+    return batchesOnDeleteDate.reduce((sum, b) => sum + (b.totalQty || 0), 0);
+  }, [batchesOnDeleteDate]);
+
+  // Execute Daily Report Deletion by Date
+  const handleConfirmDeleteDailyReport = async () => {
+    if (!user) {
+      showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google terlebih dahulu.');
+      openLoginModal();
+      return;
+    }
+
+    try {
+      setIsDeletingReport(true);
+      const res = await deleteMarketplaceDailyReportByDate(deleteDate, deletePlatformFilter);
+      await onRefreshData();
+      setShowDeleteModal(false);
+      showToast(
+        'success',
+        'Laporan Berhasil Dihapus & Stok Dikembalikan',
+        `Laporan penjualan tanggal ${formatWIBDateDisplay(deleteDate)} (${res.deletedBatchesCount} batch file) berhasil dihapus. Stok sebanyak ${res.totalRestoredQty.toLocaleString()} unit telah dikembalikan ke saldo gudang.`
+      );
+    } catch (err: any) {
+      showToast('error', 'Gagal Menghapus Laporan', err?.message || 'Terjadi kesalahan saat menghapus laporan.');
+    } finally {
+      setIsDeletingReport(false);
+    }
+  };
+
+  // Execute Single Batch Deletion
+  const handleConfirmDeleteSingleBatch = async () => {
+    if (!batchToDelete) return;
+    if (!user) {
+      showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google terlebih dahulu.');
+      openLoginModal();
+      return;
+    }
+
+    try {
+      setIsDeletingReport(true);
+      const restored = await deleteSingleImportBatch(batchToDelete.id);
+      await onRefreshData();
+      showToast(
+        'success',
+        'Batch Berhasil Dihapus & Stok Dikembalikan',
+        `Batch ${batchToDelete.id} (${batchToDelete.fileName}) berhasil dihapus. Stok sebanyak ${restored.toLocaleString()} unit telah dikembalikan ke saldo gudang.`
+      );
+      setBatchToDelete(null);
+    } catch (err: any) {
+      showToast('error', 'Gagal Menghapus Batch', err?.message || 'Terjadi kesalahan saat menghapus batch.');
+    } finally {
+      setIsDeletingReport(false);
     }
   };
 
@@ -673,9 +753,103 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
         </div>
       </div>
 
+      {/* Hapus Laporan Harian Berdasarkan Tanggal (Koreksi Input) */}
+      <div className="bg-rose-50/70 rounded-2xl border border-rose-200 p-5 shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-rose-200/70">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 rounded-xl bg-rose-100 text-rose-700 border border-rose-200 shrink-0">
+              <CalendarX className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-rose-950">
+                  Hapus Laporan Harian Marketplace (Koreksi Salah Tanggal / Upload Ulang)
+                </h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-200 text-rose-800">
+                  Rollback Stok Otomatis
+                </span>
+              </div>
+              <p className="text-xs text-rose-700/90 mt-1 max-w-2xl leading-relaxed">
+                Jika terjadi kesalahan tanggal input laporan atau salah memasukkan file penjualan, pilih tanggal di bawah ini untuk menghapus seluruh laporan tanggal tersebut. Seluruh kuantitas barang yang terpotong akan <strong>otomatis dikembalikan ke stok fisik gudang</strong> sehingga Anda dapat meng-upload ulang file dengan benar.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          <div className="md:col-span-4">
+            <label className="block text-xs font-semibold text-rose-900 mb-1">
+              Pilih Tanggal Transaksi Laporan
+            </label>
+            <div className="relative">
+              <input
+                type="date"
+                value={deleteDate}
+                onChange={(e) => setDeleteDate(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-white border border-rose-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500 font-medium text-slate-800 shadow-2xs"
+              />
+            </div>
+          </div>
+
+          <div className="md:col-span-3">
+            <label className="block text-xs font-semibold text-rose-900 mb-1">
+              Platform Marketplace
+            </label>
+            <select
+              value={deletePlatformFilter}
+              onChange={(e) => setDeletePlatformFilter(e.target.value as any)}
+              className="w-full px-3 py-2 text-xs bg-white border border-rose-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-rose-500 font-medium text-slate-800 shadow-2xs"
+            >
+              <option value="ALL">Semua (Shopee & TikTok)</option>
+              <option value="SHOPEE">Shopee Saja</option>
+              <option value="TIKTOK">TikTok Shop Saja</option>
+            </select>
+          </div>
+
+          <div className="md:col-span-5 flex items-center justify-end">
+            <button
+              type="button"
+              disabled={batchesOnDeleteDate.length === 0 || isDeletingReport}
+              onClick={() => setShowDeleteModal(true)}
+              className="w-full md:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 touch-manipulation"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Hapus Laporan Tanggal Ini & Kembalikan Stok</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Status Detection Box */}
+        <div className="mt-3 pt-3 border-t border-rose-200/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-rose-800 font-semibold">Status Deteksi Laporan:</span>
+            {batchesOnDeleteDate.length > 0 ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-rose-300 text-rose-900 font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Ditemukan {batchesOnDeleteDate.length} batch file ({totalQtyOnDeleteDate.toLocaleString()} unit siap di-rollback)
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 font-medium">
+                <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
+                Tidak ada laporan penjualan pada tanggal {formatWIBDateDisplay(deleteDate)}
+              </span>
+            )}
+          </div>
+
+          {batchesOnDeleteDate.length > 0 && (
+            <div className="flex items-center gap-1 text-[11px] text-rose-700">
+              <span>File terdampak: </span>
+              <span className="font-semibold truncate max-w-xs">
+                {batchesOnDeleteDate.map((b) => b.fileName).join(', ')}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* History of Marketplace Batches */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+        <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <History className="w-4 h-4 text-blue-600" />
             <h3 className="text-sm font-bold text-slate-800">
@@ -683,7 +857,7 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
             </h3>
           </div>
           <span className="text-xs text-slate-500">
-            Total {platformBatches.length} batch import tersimpan
+            Total {platformBatches.length} batch import tersimpan &bull; Anda juga dapat menghapus batch spesifik di tabel
           </span>
         </div>
 
@@ -698,12 +872,13 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
                 <th className="py-2.5 px-3 text-center">Jumlah Baris</th>
                 <th className="py-2.5 px-3 text-right">Total Qty Dipotong</th>
                 <th className="py-2.5 px-3">Pengguna</th>
+                <th className="py-2.5 px-3 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {platformBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-400">
+                  <td colSpan={8} className="py-8 text-center text-slate-400">
                     Belum ada riwayat import untuk {platform}.
                   </td>
                 </tr>
@@ -723,6 +898,17 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
                       -{b.totalQty.toLocaleString()}
                     </td>
                     <td className="py-2.5 px-3 text-slate-500">{b.createdBy}</td>
+                    <td className="py-2.5 px-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setBatchToDelete(b)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors touch-manipulation"
+                        title="Hapus batch ini dan kembalikan stok ke gudang"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Hapus & Rollback</span>
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -730,6 +916,180 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
           </table>
         </div>
       </div>
+
+      {/* Confirmation Modal: Delete Daily Report by Date */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
+          <div
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="p-5 bg-rose-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <CalendarX className="w-5 h-5 text-rose-200" />
+                <h3 className="text-base font-bold">
+                  Hapus Laporan Tanggal {formatWIBDateDisplay(deleteDate)}?
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                disabled={isDeletingReport}
+                className="p-1 rounded-lg text-rose-200 hover:text-white hover:bg-rose-700 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs text-slate-600">
+              <div className="p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-rose-900 space-y-2">
+                <p className="font-bold text-sm text-rose-800">
+                  Perhatian: Tindakan ini akan mengembalikan stok fisik!
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                  <li>
+                    Tanggal transaksi yang dihapus: <strong>{formatWIBDateDisplay(deleteDate)}</strong>
+                  </li>
+                  <li>
+                    Total file batch yang dihapus: <strong>{batchesOnDeleteDate.length} file batch</strong>
+                  </li>
+                  <li>
+                    Kuantitas barang yang dikembalikan ke stok gudang:{' '}
+                    <strong className="text-emerald-700">+{totalQtyOnDeleteDate.toLocaleString()} Unit</strong>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="space-y-1">
+                <span className="font-semibold text-slate-700">File batch yang akan dibatalkan:</span>
+                <div className="max-h-24 overflow-y-auto space-y-1 p-2 bg-slate-50 rounded-lg border border-slate-200">
+                  {batchesOnDeleteDate.map((b) => (
+                    <div key={b.id} className="flex items-center justify-between text-[11px]">
+                      <span className="font-mono text-blue-600 font-semibold">{b.id}</span>
+                      <span className="truncate max-w-[180px] font-medium text-slate-700">{b.fileName}</span>
+                      <span className="font-bold text-rose-600">{b.totalQty} unit</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-500 leading-normal">
+                Setelah dihapus, seluruh riwayat batch dan transaksi pesanan terkait akan dibersihkan. Anda dapat langsung meng-upload ulang file laporan penjualan dengan tanggal yang benar.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isDeletingReport}
+                  onClick={() => setShowDeleteModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingReport}
+                  onClick={handleConfirmDeleteDailyReport}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isDeletingReport ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Mengembalikan Stok & Menghapus...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Ya, Hapus & Kembalikan Stok</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete Single Batch */}
+      {batchToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
+          <div
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="p-5 bg-rose-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Trash2 className="w-5 h-5 text-rose-200" />
+                <h3 className="text-base font-bold">Hapus Batch Import Ini?</h3>
+              </div>
+              <button
+                onClick={() => setBatchToDelete(null)}
+                disabled={isDeletingReport}
+                className="p-1 rounded-lg text-rose-200 hover:text-white hover:bg-rose-700 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs text-slate-600">
+              <div className="p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-rose-900 space-y-2">
+                <p className="font-bold text-sm text-rose-800">
+                  Rollback Stok Fisik Gudang
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                  <li>
+                    ID Batch: <strong className="font-mono">{batchToDelete.id}</strong>
+                  </li>
+                  <li>
+                    Nama File: <strong>{batchToDelete.fileName}</strong>
+                  </li>
+                  <li>
+                    Tanggal Transaksi: <strong>{formatWIBDateDisplay(batchToDelete.transactionDate)}</strong>
+                  </li>
+                  <li>
+                    Stok yang dikembalikan:{' '}
+                    <strong className="text-emerald-700">+{batchToDelete.totalQty.toLocaleString()} Unit</strong>
+                  </li>
+                </ul>
+              </div>
+
+              <p className="text-[11px] text-slate-500 leading-normal">
+                Batch dan seluruh transaksi terkait pesanan ini akan dihapus dari sistem. Saldo barang akan bertambah kembali sehingga Anda dapat meng-upload ulang file tersebut.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isDeletingReport}
+                  onClick={() => setBatchToDelete(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingReport}
+                  onClick={handleConfirmDeleteSingleBatch}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isDeletingReport ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menghapus...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Ya, Hapus & Rollback Stok</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -650,6 +650,179 @@ export async function checkPotentialDuplicateBatch(
   return match || null;
 }
 
+export interface DeleteDailyReportResult {
+  date: string;
+  platform: string;
+  deletedBatchesCount: number;
+  deletedTxCount: number;
+  totalRestoredQty: number;
+  affectedProductsCount: number;
+  batchIds: string[];
+}
+
+/**
+ * Delete all marketplace stock-out reports/batches for a specific date (and optional platform)
+ * and safely roll back the deducted stock to master products so it can be re-uploaded.
+ */
+export async function deleteMarketplaceDailyReportByDate(
+  date: string,
+  platform: 'SHOPEE' | 'TIKTOK' | 'ALL' = 'ALL'
+): Promise<DeleteDailyReportResult> {
+  try {
+    const [allBatches, allTx, allProducts] = await Promise.all([
+      getAllImportBatches(),
+      getAllTransactions(),
+      getAllProducts(),
+    ]);
+
+    // 1. Filter target batches
+    const targetBatches = (allBatches || []).filter((b) => {
+      const matchDate = b.transactionDate === date;
+      const isMarketplace = b.platform === 'SHOPEE' || b.platform === 'TIKTOK';
+      if (!matchDate || !isMarketplace) return false;
+      if (platform === 'ALL') return true;
+      return b.platform === platform;
+    });
+
+    const targetBatchIds = new Set(targetBatches.map((b) => b.id));
+
+    // 2. Filter matching transactions (either by batchId OR by date + marketplace source)
+    const targetTx = (allTx || []).filter((tx) => {
+      const isTargetBatch = !!(tx.batchId && targetBatchIds.has(tx.batchId));
+      const isMatchingDateAndSource =
+        tx.date === date &&
+        (platform === 'ALL'
+          ? tx.source === 'SHOPEE' || tx.source === 'TIKTOK' || tx.type === 'KELUAR_SHOPEE' || tx.type === 'KELUAR_TIKTOK'
+          : tx.source === platform || (platform === 'SHOPEE' ? tx.type === 'KELUAR_SHOPEE' : tx.type === 'KELUAR_TIKTOK'));
+
+      return isTargetBatch || isMatchingDateAndSource;
+    });
+
+    if (targetBatches.length === 0 && targetTx.length === 0) {
+      throw new Error(`Tidak ditemukan laporan penjualan marketplace pada tanggal ${date}.`);
+    }
+
+    // 3. Compute quantity to restore per product
+    const restoreQtyMap = new Map<string, number>();
+    let totalRestoredQty = 0;
+
+    for (const tx of targetTx) {
+      if (tx.direction === 'OUT') {
+        const cur = restoreQtyMap.get(tx.productId) || 0;
+        restoreQtyMap.set(tx.productId, cur + tx.qty);
+        totalRestoredQty += tx.qty;
+      }
+    }
+
+    const now = new Date().toISOString();
+    const productMap = new Map((allProducts || []).map((p) => [p.id, p]));
+
+    // 4. Update affected products to restore their stock
+    for (const [prodId, addQty] of restoreQtyMap.entries()) {
+      const prod = productMap.get(prodId);
+      if (prod) {
+        const newStock = prod.currentStock + addQty;
+        await updateDoc(doc(db, 'products', prodId), {
+          currentStock: newStock,
+          updatedAt: now,
+        });
+      }
+    }
+
+    // 5. Delete transactions in chunks of 400
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < targetTx.length; i += CHUNK_SIZE) {
+      const chunk = targetTx.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const tx of chunk) {
+        batch.delete(doc(db, 'transactions', tx.id));
+      }
+      await batch.commit();
+    }
+
+    // 6. Delete batches in chunks of 400
+    for (let i = 0; i < targetBatches.length; i += CHUNK_SIZE) {
+      const chunk = targetBatches.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const b of chunk) {
+        batch.delete(doc(db, 'import_batches', b.id));
+      }
+      await batch.commit();
+    }
+
+    return {
+      date,
+      platform,
+      deletedBatchesCount: targetBatches.length,
+      deletedTxCount: targetTx.length,
+      totalRestoredQty,
+      affectedProductsCount: restoreQtyMap.size,
+      batchIds: Array.from(targetBatchIds),
+    };
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.WRITE, 'transactions');
+    throw err;
+  }
+}
+
+/**
+ * Delete a single import batch and rollback its stock deductions
+ */
+export async function deleteSingleImportBatch(batchId: string): Promise<number> {
+  try {
+    const [allBatches, allTx, allProducts] = await Promise.all([
+      getAllImportBatches(),
+      getAllTransactions(),
+      getAllProducts(),
+    ]);
+
+    const targetTx = (allTx || []).filter((tx) => tx.batchId === batchId);
+    const restoreQtyMap = new Map<string, number>();
+    let totalRestoredQty = 0;
+
+    for (const tx of targetTx) {
+      if (tx.direction === 'OUT') {
+        const cur = restoreQtyMap.get(tx.productId) || 0;
+        restoreQtyMap.set(tx.productId, cur + tx.qty);
+        totalRestoredQty += tx.qty;
+      }
+    }
+
+    const now = new Date().toISOString();
+    const productMap = new Map((allProducts || []).map((p) => [p.id, p]));
+
+    for (const [prodId, addQty] of restoreQtyMap.entries()) {
+      const prod = productMap.get(prodId);
+      if (prod) {
+        await updateDoc(doc(db, 'products', prodId), {
+          currentStock: prod.currentStock + addQty,
+          updatedAt: now,
+        });
+      }
+    }
+
+    // Delete transactions
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < targetTx.length; i += CHUNK_SIZE) {
+      const chunk = targetTx.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const tx of chunk) {
+        batch.delete(doc(db, 'transactions', tx.id));
+      }
+      await batch.commit();
+    }
+
+    // Delete batch doc
+    await deleteDoc(doc(db, 'import_batches', batchId));
+
+    return totalRestoredQty;
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.WRITE, 'import_batches');
+    throw err;
+  }
+}
+
+
 /**
  * -------------------------------------------------------------
  * PRODUCT MAPPINGS (ALIASES FOR SHOPEE & TIKTOK)
