@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { Product, StockTransaction, ReportItemSummary } from '../types/inventory';
+import { Product, StockTransaction, ReportItemSummary, ImportBatch } from '../types/inventory';
 import {
   PeriodFilter,
   getDateRangeForPeriod,
   formatWIBDateDisplay,
+  formatWIBDateTimeDisplay,
   getTodayWIB,
 } from '../utils/dateUtils';
 import {
@@ -21,25 +22,31 @@ import {
   FileText,
   Printer,
   Boxes,
+  Eye,
+  ShoppingBag,
 } from 'lucide-react';
+import { BatchDetailModal } from '../components/BatchDetailModal';
 
 interface LaporanStokViewProps {
   products: Product[];
   transactions: StockTransaction[];
+  batches?: ImportBatch[];
   onRefreshData: () => Promise<void>;
 }
 
 export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
   products,
   transactions,
+  batches = [],
   onRefreshData,
 }) => {
   const [period, setPeriod] = useState<PeriodFilter>('THIS_MONTH');
   const [customStart, setCustomStart] = useState<string>(getTodayWIB());
   const [customEnd, setCustomEnd] = useState<string>(getTodayWIB());
   const [search, setSearch] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'SUMMARY' | 'DETAIL'>('SUMMARY');
+  const [activeTab, setActiveTab] = useState<'SUMMARY' | 'DETAIL' | 'BATCHES'>('SUMMARY');
   const [marketplaceFilter, setMarketplaceFilter] = useState<string>('ALL');
+  const [selectedBatchForDetail, setSelectedBatchForDetail] = useState<ImportBatch | null>(null);
 
   // Compute Active Date Range
   const dateRange = useMemo(() => {
@@ -429,12 +436,12 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
         )}
       </div>
 
-      {/* Tabs: Ringkasan Per Barang vs Detail Transaksi */}
+      {/* Tabs: Ringkasan Per Barang vs Detail Transaksi vs Riwayat Upload */}
       <div className="flex items-center justify-between border-b border-slate-200">
-        <div className="flex items-center gap-4 text-xs font-bold">
+        <div className="flex items-center gap-4 text-xs font-bold overflow-x-auto">
           <button
             onClick={() => setActiveTab('SUMMARY')}
-            className={`pb-3 border-b-2 transition-all ${
+            className={`pb-3 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'SUMMARY'
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -444,13 +451,24 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('DETAIL')}
-            className={`pb-3 border-b-2 transition-all ${
+            className={`pb-3 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'DETAIL'
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             Audit Detail Seluruh Transaksi ({periodDetailTransactions.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('BATCHES')}
+            className={`pb-3 border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'BATCHES'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Riwayat File Upload ({batches.length})</span>
           </button>
         </div>
 
@@ -638,7 +656,41 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
                         {tx.balanceAfter.toLocaleString()}
                       </td>
                       <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
-                        {tx.referenceNo || '-'}
+                        {tx.batchId ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const bId = tx.batchId!;
+                              const found = batches.find((b) => b.id === bId);
+                              if (found) {
+                                setSelectedBatchForDetail(found);
+                              } else {
+                                setSelectedBatchForDetail({
+                                  id: bId,
+                                  platform: (tx.source === 'TIKTOK'
+                                    ? 'TIKTOK'
+                                    : tx.source === 'SHOPEE'
+                                    ? 'SHOPEE'
+                                    : 'PENJUALAN_LAIN') as any,
+                                  transactionDate: tx.date,
+                                  importedAt: tx.createdAt || tx.date,
+                                  itemCount: 1,
+                                  totalQty: tx.qty,
+                                  status: 'SUCCESS',
+                                  fileName: bId,
+                                  createdBy: tx.createdBy,
+                                });
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline cursor-pointer font-bold"
+                            title="Klik untuk melihat seluruh rincian batch ini"
+                          >
+                            <Eye className="w-3 h-3 text-blue-500" />
+                            <span>{tx.referenceNo || tx.batchId}</span>
+                          </button>
+                        ) : (
+                          tx.referenceNo || '-'
+                        )}
                       </td>
                       <td className="py-2.5 px-3 text-slate-500 text-[11px] max-w-xs truncate">
                         {tx.notes || '-'}
@@ -650,6 +702,135 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
             </table>
           </div>
         </div>
+      )}
+
+      {/* TAB 3: RIWAYAT FILE UPLOAD (ALL BATCHES) */}
+      {activeTab === 'BATCHES' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">
+                Semua Riwayat File Upload & Batch Import
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Klik pada Batch ID atau tombol &quot;Lihat Data&quot; untuk mengecek rincian pesanan dan barang yang terpotong
+              </p>
+            </div>
+            <span className="text-xs text-slate-500 font-medium">
+              Total {batches.length} batch tersimpan
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider">
+                <tr>
+                  <th className="py-2.5 px-3">Batch ID</th>
+                  <th className="py-2.5 px-3">Platform</th>
+                  <th className="py-2.5 px-3">Tanggal Transaksi</th>
+                  <th className="py-2.5 px-3">Waktu Import</th>
+                  <th className="py-2.5 px-3">Nama File</th>
+                  <th className="py-2.5 px-3 text-center">Jumlah Baris</th>
+                  <th className="py-2.5 px-3 text-right">Total Qty Dipotong</th>
+                  <th className="py-2.5 px-3">Pengguna</th>
+                  <th className="py-2.5 px-3 text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                {batches.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                      Belum ada riwayat batch file upload yang tercatat di sistem.
+                    </td>
+                  </tr>
+                ) : (
+                  batches
+                    .filter((b) => {
+                      if (!search.trim()) return true;
+                      const q = search.toLowerCase();
+                      return (
+                        b.id.toLowerCase().includes(q) ||
+                        b.fileName.toLowerCase().includes(q) ||
+                        b.platform.toLowerCase().includes(q) ||
+                        (b.createdBy || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map((b) => (
+                      <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-2.5 px-3">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedBatchForDetail(b)}
+                            className="group inline-flex items-center gap-1.5 font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline text-left cursor-pointer transition-colors"
+                            title="Klik untuk melihat rincian batch ini"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-blue-500 group-hover:text-blue-700 shrink-0" />
+                            <span>{b.id}</span>
+                          </button>
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              b.platform === 'SHOPEE'
+                                ? 'bg-orange-100 text-orange-800'
+                                : b.platform === 'TIKTOK'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}
+                          >
+                            {b.platform}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-[11px]">
+                          {formatWIBDateDisplay(b.transactionDate)}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-500">
+                          {formatWIBDateTimeDisplay(b.importedAt)}
+                        </td>
+                        <td
+                          className="py-2.5 px-3 font-medium text-slate-800 max-w-[180px] truncate"
+                          title={b.fileName}
+                        >
+                          {b.fileName}
+                        </td>
+                        <td className="py-2.5 px-3 text-center text-slate-600">{b.itemCount} item</td>
+                        <td className="py-2.5 px-3 text-right font-bold text-rose-600">
+                          -{b.totalQty.toLocaleString()}
+                        </td>
+                        <td
+                          className="py-2.5 px-3 text-slate-500 max-w-[150px] truncate"
+                          title={b.createdBy}
+                        >
+                          {b.createdBy}
+                        </td>
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedBatchForDetail(b)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
+                            title="Lihat rincian data dan cek ulang pesanan"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Lihat Data</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Detail Modal */}
+      {selectedBatchForDetail && (
+        <BatchDetailModal
+          batch={selectedBatchForDetail}
+          allTransactions={transactions}
+          products={products}
+          onClose={() => setSelectedBatchForDetail(null)}
+        />
       )}
     </div>
   );

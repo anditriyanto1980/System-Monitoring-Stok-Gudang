@@ -200,6 +200,7 @@ function WarehouseApp() {
                   <LaporanStokView
                     products={products}
                     transactions={transactions}
+                    batches={batches}
                     onRefreshData={loadData}
                   />
                 )}

@@ -992,6 +992,27 @@ export async function getAllImportBatches(): Promise<ImportBatch[]> {
     return snap.docs.map(d => d.data() as ImportBatch);
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, 'import_batches');
+    return [];
+  }
+}
+
+/**
+ * Fetch all stock transactions belonging to a specific batch ID
+ */
+export async function getTransactionsByBatchId(batchId: string): Promise<StockTransaction[]> {
+  try {
+    const q = query(collection(db, 'transactions'), where('batchId', '==', batchId));
+    const snap = await getDocs(q);
+    const results = snap.docs.map(d => d.data() as StockTransaction);
+    // Sort in memory by orderId/referenceNo, then productName
+    return results.sort((a, b) => {
+      const refA = a.referenceNo || '';
+      const refB = b.referenceNo || '';
+      return refA.localeCompare(refB) || a.productName.localeCompare(b.productName);
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'transactions');
+    return [];
   }
 }
 

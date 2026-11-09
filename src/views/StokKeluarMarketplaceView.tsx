@@ -40,7 +40,9 @@ import {
   RotateCcw,
   Loader2,
   X,
+  Eye,
 } from 'lucide-react';
+import { BatchDetailModal } from '../components/BatchDetailModal';
 
 interface StokKeluarMarketplaceViewProps {
   products: Product[];
@@ -76,6 +78,7 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
   const [isDeletingReport, setIsDeletingReport] = useState<boolean>(false);
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
   const [batchToDelete, setBatchToDelete] = useState<ImportBatch | null>(null);
+  const [selectedBatchForDetail, setSelectedBatchForDetail] = useState<ImportBatch | null>(null);
 
   // Active platform batches
   const platformBatches = useMemo(() => {
@@ -884,30 +887,55 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
                 </tr>
               ) : (
                 platformBatches.map((b) => (
-                  <tr key={b.id} className="hover:bg-slate-50/70">
-                    <td className="py-2.5 px-3 font-mono font-bold text-blue-600">{b.id}</td>
+                  <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-2.5 px-3">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBatchForDetail(b)}
+                        className="group inline-flex items-center gap-1.5 font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline text-left cursor-pointer transition-colors"
+                        title="Klik untuk melihat rincian seluruh data yang di-upload"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-blue-500 group-hover:text-blue-700 shrink-0" />
+                        <span>{b.id}</span>
+                      </button>
+                    </td>
                     <td className="py-2.5 px-3 font-mono text-[11px]">
                       {formatWIBDateDisplay(b.transactionDate)}
                     </td>
                     <td className="py-2.5 px-3 text-slate-500">
                       {formatWIBDateTimeDisplay(b.importedAt)}
                     </td>
-                    <td className="py-2.5 px-3 font-medium text-slate-800">{b.fileName}</td>
+                    <td className="py-2.5 px-3 font-medium text-slate-800 max-w-[180px] truncate" title={b.fileName}>
+                      {b.fileName}
+                    </td>
                     <td className="py-2.5 px-3 text-center text-slate-600">{b.itemCount} item</td>
                     <td className="py-2.5 px-3 text-right font-bold text-rose-600">
                       -{b.totalQty.toLocaleString()}
                     </td>
-                    <td className="py-2.5 px-3 text-slate-500">{b.createdBy}</td>
-                    <td className="py-2.5 px-3 text-center">
-                      <button
-                        type="button"
-                        onClick={() => setBatchToDelete(b)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors touch-manipulation"
-                        title="Hapus batch ini dan kembalikan stok ke gudang"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                        <span>Hapus & Rollback</span>
-                      </button>
+                    <td className="py-2.5 px-3 text-slate-500 max-w-[150px] truncate" title={b.createdBy}>
+                      {b.createdBy}
+                    </td>
+                    <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedBatchForDetail(b)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
+                          title="Lihat rincian data dan cek ulang pesanan"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-blue-600" />
+                          <span>Lihat Data</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBatchToDelete(b)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
+                          title="Hapus batch ini dan kembalikan stok ke gudang"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                          <span>Hapus & Rollback</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -1089,6 +1117,20 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Detail Modal: Inspect and check batch items */}
+      {selectedBatchForDetail && (
+        <BatchDetailModal
+          batch={selectedBatchForDetail}
+          allTransactions={transactions}
+          products={products}
+          onClose={() => setSelectedBatchForDetail(null)}
+          onDeleteBatch={(b) => {
+            setSelectedBatchForDetail(null);
+            setBatchToDelete(b);
+          }}
+        />
       )}
     </div>
   );
