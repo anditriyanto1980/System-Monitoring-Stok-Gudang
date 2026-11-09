@@ -1,6 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { Product, StockTransaction } from '../types/inventory';
-import { recordStockIn } from '../services/inventoryService';
+import {
+  recordStockIn,
+  deleteStockInTransaction,
+  updateStockInTransaction,
+} from '../services/inventoryService';
 import { getTodayWIB, formatWIBDateDisplay } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/NotificationToast';
@@ -13,6 +17,10 @@ import {
   CheckCircle2,
   RotateCcw,
   Package,
+  Edit3,
+  Loader2,
+  AlertTriangle,
+  X,
 } from 'lucide-react';
 
 interface StokMasukViewProps {
@@ -47,6 +55,20 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
     return [{ productId: '', qty: 1 }];
   });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Delete Transaction State
+  const [txToDelete, setTxToDelete] = useState<StockTransaction | null>(null);
+  const [isDeletingTx, setIsDeletingTx] = useState<boolean>(false);
+
+  // Edit Transaction State
+  const [txToEdit, setTxToEdit] = useState<StockTransaction | null>(null);
+  const [editDate, setEditDate] = useState<string>('');
+  const [editType, setEditType] = useState<'MASUK' | 'RETUR'>('MASUK');
+  const [editProductId, setEditProductId] = useState<string>('');
+  const [editQty, setEditQty] = useState<number>(1);
+  const [editRef, setEditRef] = useState<string>('');
+  const [editNotes, setEditNotes] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // Update selected product if initialProductId changes
   React.useEffect(() => {
@@ -172,6 +194,92 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
       showToast('error', 'Gagal Mencatat Stok Masuk', err?.message || 'Terjadi kesalahan sistem.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Open Edit Modal
+  const handleOpenEditModal = (tx: StockTransaction) => {
+    setTxToEdit(tx);
+    setEditDate(tx.date);
+    setEditType(tx.type === 'RETUR' ? 'RETUR' : 'MASUK');
+    setEditProductId(tx.productId);
+    setEditQty(tx.qty);
+    setEditRef(tx.referenceNo || '');
+    setEditNotes(tx.notes || '');
+  };
+
+  // Confirm Delete
+  const handleConfirmDelete = async () => {
+    if (!txToDelete) return;
+    if (!user) {
+      showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google.');
+      openLoginModal();
+      return;
+    }
+
+    try {
+      setIsDeletingTx(true);
+      const res = await deleteStockInTransaction(txToDelete.id);
+      await onRefreshData();
+      const label = txToDelete.type === 'RETUR' ? 'Retur Konsumen' : 'Penerimaan Stok';
+      showToast(
+        'success',
+        `Transaksi ${label} Dihapus`,
+        `Transaksi ${txToDelete.productName} (${res.qty} unit) berhasil dibatalkan dan ditarik dari saldo gudang.`
+      );
+      setTxToDelete(null);
+    } catch (err: any) {
+      showToast('error', 'Gagal Menghapus Transaksi', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsDeletingTx(false);
+    }
+  };
+
+  // Confirm Save Edit
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!txToEdit) return;
+    if (!user) {
+      showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google.');
+      openLoginModal();
+      return;
+    }
+
+    if (!editDate) {
+      showToast('error', 'Validasi Gagal', 'Tanggal transaksi wajib diisi.');
+      return;
+    }
+    if (!editProductId) {
+      showToast('error', 'Validasi Gagal', 'Silakan pilih barang.');
+      return;
+    }
+    if (editQty <= 0) {
+      showToast('error', 'Validasi Gagal', 'Kuantitas harus lebih besar dari 0.');
+      return;
+    }
+
+    try {
+      setIsSavingEdit(true);
+      await updateStockInTransaction(
+        txToEdit.id,
+        editDate,
+        editProductId,
+        Number(editQty),
+        editRef.trim(),
+        editNotes.trim(),
+        editType
+      );
+      await onRefreshData();
+      showToast(
+        'success',
+        'Transaksi Berhasil Diperbarui',
+        `Perubahan pada transaksi ${editType === 'RETUR' ? 'Retur' : 'Stok Masuk'} berhasil disimpan dan stok gudang telah disesuaikan.`
+      );
+      setTxToEdit(null);
+    } catch (err: any) {
+      showToast('error', 'Gagal Memperbarui Transaksi', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -487,12 +595,13 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
                   <th className="py-2.5 px-3 text-right">Qty Masuk</th>
                   <th className="py-2.5 px-3 text-right">Saldo Sesudah</th>
                   <th className="py-2.5 px-3">No Ref / Catatan</th>
+                  <th className="py-2.5 px-3 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {stockInHistory.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-400">
+                    <td colSpan={7} className="py-12 text-center text-slate-400">
                       Belum ada transaksi stok masuk yang tercatat.
                     </td>
                   </tr>
@@ -528,6 +637,28 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
                         )}
                         <span className="text-[10px]">{tx.notes || '-'}</span>
                       </td>
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(tx)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-blue-600 hover:text-blue-700 hover:bg-blue-50 text-[11px] font-semibold transition-colors"
+                            title="Edit Transaksi Ini"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTxToDelete(tx)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-rose-600 hover:text-rose-700 hover:bg-rose-50 text-[11px] font-semibold transition-colors"
+                            title="Hapus Transaksi & Tarik dari Stok"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Hapus</span>
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -536,6 +667,290 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {txToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-rose-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">
+                    Hapus Transaksi {txToDelete.type === 'RETUR' ? 'Retur Konsumen' : 'Stok Masuk'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Konfirmasi pembatalan pencatatan barang masuk
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isDeletingTx && setTxToDelete(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Tanggal Transaksi:</span>
+                  <span className="font-mono font-bold text-slate-700">
+                    {formatWIBDateDisplay(txToDelete.date)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Tipe:</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      txToDelete.type === 'RETUR'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-emerald-100 text-emerald-800'
+                    }`}
+                  >
+                    {txToDelete.type === 'RETUR' ? 'RETUR KONSUMEN' : 'STOK MASUK REGULER'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-start pb-2 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Barang:</span>
+                  <span className="font-bold text-slate-800 text-right max-w-[200px]">
+                    {txToDelete.productName}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Jumlah yang Dibatalkan:</span>
+                  <span className="font-bold text-rose-600 font-mono text-sm">
+                    -{txToDelete.qty.toLocaleString()} pcs
+                  </span>
+                </div>
+                {txToDelete.referenceNo && (
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                    <span className="text-slate-500 font-medium">No. Referensi / Resi:</span>
+                    <span className="font-mono font-medium text-slate-700">
+                      {txToDelete.referenceNo}
+                    </span>
+                  </div>
+                )}
+                {txToDelete.notes && (
+                  <div className="flex justify-between items-start">
+                    <span className="text-slate-500 font-medium">Catatan:</span>
+                    <span className="text-slate-600 text-right max-w-[200px]">
+                      {txToDelete.notes}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <p>
+                  <strong>Perhatian:</strong> Menghapus transaksi ini akan secara otomatis menarik kembali{' '}
+                  <strong className="text-rose-600">{txToDelete.qty} unit</strong> dari saldo stok gudang{' '}
+                  <strong>{txToDelete.productName}</strong>. Jika stok fisik saat ini kurang dari jumlah tersebut, penghapusan akan dicegah demi keamanan data.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingTx}
+                  onClick={() => setTxToDelete(null)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 text-xs transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingTx}
+                  onClick={handleConfirmDelete}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                >
+                  {isDeletingTx ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menghapus...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Ya, Hapus & Tarik Stok</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Transaction Modal */}
+      {txToEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-blue-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">
+                    Edit Transaksi {txToEdit.type === 'RETUR' ? 'Retur Konsumen' : 'Stok Masuk'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Koreksi kuantitas, tanggal, jenis barang, atau nomor referensi
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isSavingEdit && setTxToEdit(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Tanggal Transaksi <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-hidden focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Tipe Transaksi <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={editType}
+                    onChange={(e) => setEditType(e.target.value as 'MASUK' | 'RETUR')}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-hidden focus:border-blue-500"
+                  >
+                    <option value="MASUK">Stok Masuk Reguler (Penerimaan Vendor / Supplier)</option>
+                    <option value="RETUR">Retur Konsumen / Pembeli</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Pilih Barang <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  required
+                  value={editProductId}
+                  onChange={(e) => setEditProductId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-hidden focus:border-blue-500 font-medium text-slate-800"
+                >
+                  <option value="">-- Pilih Barang --</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} (Stok Saat Ini: {p.currentStock})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Kuantitas (Qty Masuk) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={editQty}
+                      onChange={(e) => setEditQty(Math.max(1, Number(e.target.value)))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                    />
+                    <span className="absolute right-3 top-2 text-xs text-slate-400 font-medium">
+                      unit
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Qty Sebelumnya: <strong>{txToEdit.qty} unit</strong>
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    No. Ref / No. Resi / Surat Jalan
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: INV-2025-001 / JP12345678"
+                    value={editRef}
+                    onChange={(e) => setEditRef(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-hidden focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Catatan / Keterangan
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Keterangan koreksi atau alasan retur..."
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-hidden focus:border-blue-500 text-slate-800"
+                />
+              </div>
+
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-800 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                <p>
+                  Sistem akan otomatis menghitung selisih kuantitas baru dengan kuantitas lama dan menyesuaikan saldo stok fisik gudang secara presisi dan aman tanpa membuat stok menjadi negatif.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isSavingEdit}
+                  onClick={() => setTxToEdit(null)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 text-xs transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                >
+                  {isSavingEdit ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menyimpan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Simpan Perubahan & Sesuaikan Stok</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

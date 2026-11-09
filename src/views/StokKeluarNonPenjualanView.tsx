@@ -1,6 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { Product, StockTransaction } from '../types/inventory';
-import { recordStockOutNonSales } from '../services/inventoryService';
+import {
+  recordStockOutNonSales,
+  deleteStockOutNonSalesBySo,
+  updateStockOutNonSalesBySo,
+} from '../services/inventoryService';
 import { getTodayWIB, formatWIBDateDisplay } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/NotificationToast';
@@ -14,6 +18,9 @@ import {
   Eye,
   X,
   Package,
+  Edit3,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface StokKeluarNonPenjualanViewProps {
@@ -50,6 +57,28 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
     notes: string;
     items: StockTransaction[];
   } | null>(null);
+
+  // Delete State
+  const [soToDelete, setSoToDelete] = useState<{
+    soNumber: string;
+    date: string;
+    notes: string;
+    items: StockTransaction[];
+  } | null>(null);
+  const [isDeletingSo, setIsDeletingSo] = useState<boolean>(false);
+
+  // Edit State
+  const [soToEdit, setSoToEdit] = useState<{
+    soNumber: string;
+    date: string;
+    notes: string;
+    items: StockTransaction[];
+  } | null>(null);
+  const [editDate, setEditDate] = useState<string>('');
+  const [editSoNumber, setEditSoNumber] = useState<string>('');
+  const [editNotes, setEditNotes] = useState<string>('');
+  const [editItems, setEditItems] = useState<NonSalesItemEntry[]>([]);
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   const activeProducts = useMemo(() => products.filter((p) => p.isActive), [products]);
 
@@ -173,6 +202,131 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
       showToast('error', 'Gagal Memproses Transaksi', err?.message || 'Terjadi kesalahan sistem.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Open Edit Modal
+  const handleOpenEditModal = (rec: {
+    soNumber: string;
+    date: string;
+    notes: string;
+    items: StockTransaction[];
+  }) => {
+    setSoToEdit(rec);
+    setEditDate(rec.date);
+    setEditSoNumber(rec.soNumber);
+    setEditNotes(rec.notes);
+    setEditItems(
+      rec.items.map((it) => ({
+        productId: it.productId,
+        qty: it.qty,
+      }))
+    );
+  };
+
+  const handleAddEditItem = () => {
+    setEditItems((prev) => [...prev, { productId: '', qty: 1 }]);
+  };
+
+  const handleRemoveEditItem = (index: number) => {
+    if (editItems.length === 1) return;
+    setEditItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleEditItemChange = (index: number, field: 'productId' | 'qty', value: any) => {
+    setEditItems((prev) => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
+  };
+
+  // Confirm Delete
+  const handleConfirmDelete = async () => {
+    if (!soToDelete) return;
+    if (!user) {
+      showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google.');
+      openLoginModal();
+      return;
+    }
+
+    try {
+      setIsDeletingSo(true);
+      const totalRestored = await deleteStockOutNonSalesBySo(soToDelete.soNumber);
+      await onRefreshData();
+      showToast(
+        'success',
+        'Transaksi SO Berhasil Dihapus',
+        `Transaksi ${soToDelete.soNumber} berhasil dihapus. Stok sebanyak ${totalRestored.toLocaleString()} unit telah dikembalikan ke saldo gudang.`
+      );
+      setSoToDelete(null);
+      if (selectedSoDetail?.soNumber === soToDelete.soNumber) {
+        setSelectedSoDetail(null);
+      }
+    } catch (err: any) {
+      showToast('error', 'Gagal Menghapus Transaksi', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsDeletingSo(false);
+    }
+  };
+
+  // Confirm Save Edit
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!soToEdit) return;
+    if (!user) {
+      showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google.');
+      openLoginModal();
+      return;
+    }
+
+    if (!editSoNumber.trim()) {
+      showToast('error', 'Validasi Gagal', 'Nomor SO wajib diisi.');
+      return;
+    }
+    if (!editDate) {
+      showToast('error', 'Validasi Gagal', 'Tanggal transaksi wajib diisi.');
+      return;
+    }
+
+    const validEditItems: { productId: string; qty: number }[] = [];
+    for (let i = 0; i < editItems.length; i++) {
+      const it = editItems[i];
+      if (!it.productId) {
+        showToast('error', 'Validasi Gagal', `Baris ${i + 1}: Silakan pilih barang.`);
+        return;
+      }
+      if (!it.qty || it.qty <= 0) {
+        showToast('error', 'Validasi Gagal', `Baris ${i + 1}: Qty harus lebih besar dari 0.`);
+        return;
+      }
+      validEditItems.push({ productId: it.productId, qty: Number(it.qty) });
+    }
+
+    try {
+      setIsSavingEdit(true);
+      await updateStockOutNonSalesBySo(
+        soToEdit.soNumber,
+        editDate,
+        editSoNumber.trim(),
+        validEditItems,
+        editNotes.trim(),
+        user?.email || 'Staf Gudang'
+      );
+      await onRefreshData();
+      showToast(
+        'success',
+        'Transaksi SO Berhasil Diperbarui',
+        `Perubahan pada ${editSoNumber} berhasil disimpan dan penyesuaian stok gudang telah diperbarui otomatis.`
+      );
+      setSoToEdit(null);
+      if (selectedSoDetail?.soNumber === soToEdit.soNumber) {
+        setSelectedSoDetail(null);
+      }
+    } catch (err: any) {
+      showToast('error', 'Gagal Memperbarui Transaksi', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -427,13 +581,30 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
                         <td className="py-2.5 px-3 text-right font-bold text-rose-600">
                           -{totalQty.toLocaleString()}
                         </td>
-                        <td className="py-2.5 px-3 text-right">
-                          <button
-                            onClick={() => setSelectedSoDetail(rec)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-slate-600 hover:text-blue-600 hover:bg-blue-50 text-[11px] font-medium"
-                          >
-                            <Eye className="w-3.5 h-3.5" /> Detail
-                          </button>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => setSelectedSoDetail(rec)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-[11px] font-medium transition-colors"
+                              title="Lihat Detail Transaksi"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Detail
+                            </button>
+                            <button
+                              onClick={() => handleOpenEditModal(rec)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-blue-600 hover:text-blue-700 hover:bg-blue-50 text-[11px] font-semibold transition-colors"
+                              title="Edit Transaksi SO Ini"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" /> Edit
+                            </button>
+                            <button
+                              onClick={() => setSoToDelete(rec)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-rose-600 hover:text-rose-700 hover:bg-rose-50 text-[11px] font-semibold transition-colors"
+                              title="Hapus Transaksi SO Ini & Kembalikan Stok"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Hapus
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -447,7 +618,7 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
 
       {/* SO Detail Modal */}
       {selectedSoDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-100">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div>
@@ -507,7 +678,30 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
               </div>
             </div>
 
-            <div className="flex justify-end pt-4 mt-4 border-t border-slate-100">
+            <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-100">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOpenEditModal(selectedSoDetail);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-colors"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edit Transaksi</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSoToDelete(selectedSoDetail);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Hapus</span>
+                </button>
+              </div>
+
               <button
                 onClick={() => setSelectedSoDetail(null)}
                 className="px-4 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl"
@@ -515,6 +709,283 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
                 Tutup
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {soToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
+          <div
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="p-5 bg-rose-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Trash2 className="w-5 h-5 text-rose-200" />
+                <h3 className="text-base font-bold">Hapus Transaksi SO?</h3>
+              </div>
+              <button
+                onClick={() => setSoToDelete(null)}
+                disabled={isDeletingSo}
+                className="p-1 rounded-lg text-rose-200 hover:text-white hover:bg-rose-700 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs text-slate-600">
+              <div className="p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-rose-900 space-y-2">
+                <p className="font-bold text-sm text-rose-800">
+                  Konfirmasi Pengembalian Stok Fisik Gudang
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                  <li>
+                    Nomor SO: <strong className="font-mono text-purple-700">{soToDelete.soNumber}</strong>
+                  </li>
+                  <li>
+                    Tanggal Transaksi: <strong>{formatWIBDateDisplay(soToDelete.date)}</strong>
+                  </li>
+                  <li>
+                    Keperluan: <strong>{soToDelete.notes}</strong>
+                  </li>
+                  <li>
+                    Total stok yang dikembalikan:{' '}
+                    <strong className="text-emerald-700">
+                      +{soToDelete.items.reduce((sum, it) => sum + it.qty, 0).toLocaleString()} Unit
+                    </strong>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="space-y-1">
+                <span className="font-semibold text-slate-700">Barang yang akan dikembalikan:</span>
+                <div className="max-h-24 overflow-y-auto space-y-1 p-2 bg-slate-50 rounded-lg border border-slate-200">
+                  {soToDelete.items.map((it) => (
+                    <div key={it.id} className="flex items-center justify-between text-[11px]">
+                      <span className="font-medium text-slate-800">{it.productName}</span>
+                      <span className="font-bold text-emerald-600">+{it.qty} unit</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-500 leading-normal">
+                Transaksi ini akan dihapus permanen dan seluruh jumlah barang yang dikeluarkan akan otomatis dikembalikan ke saldo gudang saat ini.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isDeletingSo}
+                  onClick={() => setSoToDelete(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingSo}
+                  onClick={handleConfirmDelete}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isDeletingSo ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Mengembalikan Stok...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Ya, Hapus & Kembalikan Stok</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {soToEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
+          <div
+            className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[92vh]"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-blue-700 to-indigo-700 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-white/10 rounded-xl">
+                  <Edit3 className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold">Edit Transaksi Non-Penjualan</h3>
+                  <p className="text-xs text-blue-100">
+                    Koreksi nomor SO, tanggal, keperluan, atau daftar barang
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSoToEdit(null)}
+                disabled={isSavingEdit}
+                className="p-1 rounded-lg text-blue-200 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="p-5 overflow-y-auto space-y-4 text-xs flex-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Tanggal */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Tanggal Transaksi <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* Nomor SO */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Nomor SO / Surat Perintah <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editSoNumber}
+                    onChange={(e) => setEditSoNumber(e.target.value)}
+                    placeholder="Contoh: SO-001"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-mono font-semibold focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Keperluan / Keterangan */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Keperluan / Keterangan Pengeluaran
+                </label>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="Contoh: Sample Produk - Tester Toko Cabang"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Items List */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="font-semibold text-slate-700">Daftar Barang Keluar</label>
+                  <button
+                    type="button"
+                    onClick={handleAddEditItem}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-700"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Tambah Baris
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {editItems.map((it, idx) => {
+                    const selectedProd = products.find((p) => p.id === it.productId);
+                    return (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <select
+                            required
+                            value={it.productId}
+                            onChange={(e) => handleEditItemChange(idx, 'productId', e.target.value)}
+                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-800 focus:outline-hidden"
+                          >
+                            <option value="">-- Pilih Barang --</option>
+                            {activeProducts.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} (Stok Saat Ini: {p.currentStock})
+                              </option>
+                            ))}
+                          </select>
+                          {selectedProd && (
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              Stok saat ini: {selectedProd.currentStock} unit
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="w-24 shrink-0">
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            placeholder="Qty"
+                            value={it.qty}
+                            onChange={(e) =>
+                              handleEditItemChange(idx, 'qty', Math.max(1, Number(e.target.value)))
+                            }
+                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-right text-rose-600 focus:outline-hidden"
+                          />
+                        </div>
+
+                        {editItems.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveEditItem(idx)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-[11px] text-blue-800 leading-relaxed">
+                ℹ️ <strong>Penyesuaian Otomatis:</strong> Sistem akan mengkalkulasi selisih kuantitas lama dan baru secara otomatis sehingga stok gudang Anda tetap akurat 100%.
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 shrink-0">
+                <button
+                  type="button"
+                  disabled={isSavingEdit}
+                  onClick={() => setSoToEdit(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isSavingEdit ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menyimpan Perubahan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Simpan & Sesuaikan Stok</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

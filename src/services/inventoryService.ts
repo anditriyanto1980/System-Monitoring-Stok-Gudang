@@ -414,6 +414,181 @@ export async function recordStockIn(
 }
 
 /**
+ * Delete a stock-in or retur transaction and safely roll back the stock addition
+ */
+export async function deleteStockInTransaction(
+  txId: string
+): Promise<{ productName: string; qty: number; type: string }> {
+  try {
+    const txRef = doc(db, 'transactions', txId);
+    const txSnap = await getDoc(txRef);
+
+    if (!txSnap.exists()) {
+      throw new Error(`Transaksi ID "${txId}" tidak ditemukan.`);
+    }
+
+    const tx = txSnap.data() as StockTransaction;
+
+    if (tx.direction !== 'IN') {
+      throw new Error('Hanya transaksi masuk / retur yang dapat dihapus melalui fitur ini.');
+    }
+
+    const prodRef = doc(db, 'products', tx.productId);
+    const prodSnap = await getDoc(prodRef);
+
+    if (!prodSnap.exists()) {
+      throw new Error(`Barang "${tx.productName}" tidak ditemukan di master data.`);
+    }
+
+    const prod = prodSnap.data() as Product;
+
+    // Check if current stock has enough to deduct back
+    if (prod.currentStock < tx.qty) {
+      throw new Error(
+        `Tidak dapat membatalkan transaksi ini karena stok barang "${prod.name}" saat ini (${prod.currentStock} unit) kurang dari kuantitas yang akan ditarik (${tx.qty} unit). Pastikan stok mencukupi terlebih dahulu.`
+      );
+    }
+
+    const newStock = prod.currentStock - tx.qty;
+    const now = new Date().toISOString();
+
+    const batch = writeBatch(db);
+    batch.update(prodRef, {
+      currentStock: newStock,
+      updatedAt: now,
+    });
+    batch.delete(txRef);
+    await batch.commit();
+
+    return {
+      productName: tx.productName,
+      qty: tx.qty,
+      type: tx.type,
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'transactions');
+    throw err;
+  }
+}
+
+/**
+ * Update an existing stock-in or retur transaction (adjusts product physical stock accordingly)
+ */
+export async function updateStockInTransaction(
+  txId: string,
+  newDate: string,
+  newProductId: string,
+  newQty: number,
+  newReferenceNo: string,
+  newNotes: string,
+  newType: 'MASUK' | 'RETUR'
+): Promise<void> {
+  if (newQty <= 0) throw new Error('Kuantitas harus lebih besar dari 0.');
+
+  try {
+    const txRef = doc(db, 'transactions', txId);
+    const txSnap = await getDoc(txRef);
+
+    if (!txSnap.exists()) {
+      throw new Error(`Transaksi ID "${txId}" tidak ditemukan.`);
+    }
+
+    const oldTx = txSnap.data() as StockTransaction;
+    const now = new Date().toISOString();
+
+    if (newProductId === oldTx.productId) {
+      // Same product: calculate difference
+      const prodRef = doc(db, 'products', oldTx.productId);
+      const prodSnap = await getDoc(prodRef);
+
+      if (!prodSnap.exists()) {
+        throw new Error(`Barang "${oldTx.productName}" tidak ditemukan.`);
+      }
+
+      const prod = prodSnap.data() as Product;
+      const diff = newQty - oldTx.qty;
+      const updatedStock = prod.currentStock + diff;
+
+      if (updatedStock < 0) {
+        throw new Error(
+          `Pengurangan kuantitas menyebabkan stok "${prod.name}" menjadi negatif! Tersedia: ${prod.currentStock}, Selisih pengurangan: ${Math.abs(diff)}.`
+        );
+      }
+
+      const batch = writeBatch(db);
+      batch.update(prodRef, {
+        currentStock: updatedStock,
+        updatedAt: now,
+      });
+
+      batch.update(txRef, {
+        date: newDate,
+        qty: newQty,
+        type: newType,
+        referenceNo: newReferenceNo.trim(),
+        notes: newNotes.trim(),
+        source: newType === 'RETUR' ? 'RETUR' : 'PEMBELIAN',
+        balanceAfter: updatedStock,
+      });
+
+      await batch.commit();
+    } else {
+      // Product changed to a different item
+      const oldProdRef = doc(db, 'products', oldTx.productId);
+      const newProdRef = doc(db, 'products', newProductId);
+
+      const [oldProdSnap, newProdSnap] = await Promise.all([
+        getDoc(oldProdRef),
+        getDoc(newProdRef),
+      ]);
+
+      if (!oldProdSnap.exists()) throw new Error('Barang lama tidak ditemukan.');
+      if (!newProdSnap.exists()) throw new Error('Barang baru tidak ditemukan.');
+
+      const oldProd = oldProdSnap.data() as Product;
+      const newProd = newProdSnap.data() as Product;
+
+      if (oldProd.currentStock < oldTx.qty) {
+        throw new Error(
+          `Stok "${oldProd.name}" saat ini (${oldProd.currentStock} unit) kurang dari kuantitas lama yang akan ditarik (${oldTx.qty} unit).`
+        );
+      }
+
+      const updatedOldStock = oldProd.currentStock - oldTx.qty;
+      const updatedNewStock = newProd.currentStock + newQty;
+
+      const batch = writeBatch(db);
+      batch.update(oldProdRef, {
+        currentStock: updatedOldStock,
+        updatedAt: now,
+      });
+      batch.update(newProdRef, {
+        currentStock: updatedNewStock,
+        updatedAt: now,
+      });
+
+      batch.update(txRef, {
+        productId: newProd.id,
+        productName: newProd.name,
+        date: newDate,
+        qty: newQty,
+        type: newType,
+        referenceNo: newReferenceNo.trim(),
+        notes: newNotes.trim(),
+        source: newType === 'RETUR' ? 'RETUR' : 'PEMBELIAN',
+        balanceAfter: updatedNewStock,
+      });
+
+      await batch.commit();
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'transactions');
+    throw err;
+  }
+}
+
+
+/**
  * Record Stock Out Non-Sales (Sample, Tester, Internal, etc.)
  * Strictly validates sufficient stock in atomic transaction.
  */
@@ -488,6 +663,194 @@ export async function recordStockOutNonSales(
     handleFirestoreError(err, OperationType.WRITE, 'transactions');
   }
 }
+
+/**
+ * Delete a non-sales stock out transaction by SO Number and safely rollback deducted stock
+ */
+export async function deleteStockOutNonSalesBySo(soNumber: string): Promise<number> {
+  if (!soNumber.trim()) throw new Error('Nomor SO tidak valid.');
+
+  try {
+    const [allTx, allProducts] = await Promise.all([
+      getAllTransactions(),
+      getAllProducts(),
+    ]);
+
+    const targetTx = (allTx || []).filter(
+      (tx) => tx.type === 'KELUAR_NON_PENJUALAN' && tx.referenceNo === soNumber.trim()
+    );
+
+    if (targetTx.length === 0) {
+      throw new Error(`Tidak ditemukan transaksi non-penjualan dengan nomor SO "${soNumber}".`);
+    }
+
+    const restoreMap = new Map<string, number>();
+    let totalRestored = 0;
+
+    for (const tx of targetTx) {
+      if (tx.direction === 'OUT') {
+        const cur = restoreMap.get(tx.productId) || 0;
+        restoreMap.set(tx.productId, cur + tx.qty);
+        totalRestored += tx.qty;
+      }
+    }
+
+    const now = new Date().toISOString();
+    const productMap = new Map((allProducts || []).map((p) => [p.id, p]));
+
+    // Update affected products
+    for (const [prodId, addQty] of restoreMap.entries()) {
+      const prod = productMap.get(prodId);
+      if (prod) {
+        await updateDoc(doc(db, 'products', prodId), {
+          currentStock: prod.currentStock + addQty,
+          updatedAt: now,
+        });
+      }
+    }
+
+    // Delete transaction records in batches
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < targetTx.length; i += CHUNK_SIZE) {
+      const chunk = targetTx.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const tx of chunk) {
+        batch.delete(doc(db, 'transactions', tx.id));
+      }
+      await batch.commit();
+    }
+
+    return totalRestored;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'transactions');
+    throw err;
+  }
+}
+
+/**
+ * Update an existing non-sales stock out transaction (re-balances physical stock)
+ */
+export async function updateStockOutNonSalesBySo(
+  originalSoNumber: string,
+  newDate: string,
+  newSoNumber: string,
+  newItems: { productId: string; qty: number }[],
+  newNotes: string,
+  userEmail: string
+): Promise<void> {
+  if (!originalSoNumber.trim()) throw new Error('Nomor SO asli tidak valid.');
+  if (!newSoNumber.trim()) throw new Error('Nomor SO baru wajib diisi.');
+  if (newItems.length === 0) throw new Error('Minimal harus ada 1 barang keluar.');
+
+  try {
+    const [allTx, allProducts] = await Promise.all([
+      getAllTransactions(),
+      getAllProducts(),
+    ]);
+
+    const oldTx = (allTx || []).filter(
+      (tx) => tx.type === 'KELUAR_NON_PENJUALAN' && tx.referenceNo === originalSoNumber.trim()
+    );
+
+    if (oldTx.length === 0) {
+      throw new Error(`Transaksi SO "${originalSoNumber}" tidak ditemukan.`);
+    }
+
+    // Compute old returned qty per product
+    const oldReturnedMap = new Map<string, number>();
+    for (const tx of oldTx) {
+      if (tx.direction === 'OUT') {
+        const cur = oldReturnedMap.get(tx.productId) || 0;
+        oldReturnedMap.set(tx.productId, cur + tx.qty);
+      }
+    }
+
+    // Compute new demand per product
+    const newDemandMap = new Map<string, number>();
+    for (const it of newItems) {
+      if (it.qty <= 0) throw new Error('Kuantitas keluar harus lebih dari 0.');
+      const cur = newDemandMap.get(it.productId) || 0;
+      newDemandMap.set(it.productId, cur + it.qty);
+    }
+
+    const productMap = new Map((allProducts || []).map((p) => [p.id, p]));
+    const allInvolvedProdIds = new Set([...oldReturnedMap.keys(), ...newDemandMap.keys()]);
+
+    // Validate sufficient stock considering old returned qty
+    for (const pid of allInvolvedProdIds) {
+      const prod = productMap.get(pid);
+      if (!prod) throw new Error(`Barang ID "${pid}" tidak ditemukan.`);
+
+      const oldReturned = oldReturnedMap.get(pid) || 0;
+      const newDemand = newDemandMap.get(pid) || 0;
+      const netEffectiveStock = prod.currentStock + oldReturned;
+
+      if (netEffectiveStock < newDemand) {
+        throw new Error(
+          `Stok "${prod.name}" tidak mencukupi untuk perubahan ini! Tersedia setelah koreksi: ${netEffectiveStock}, Diminta: ${newDemand}.`
+        );
+      }
+    }
+
+    const now = new Date().toISOString();
+
+    // 1. Update product stocks
+    for (const pid of allInvolvedProdIds) {
+      const prod = productMap.get(pid)!;
+      const oldReturned = oldReturnedMap.get(pid) || 0;
+      const newDemand = newDemandMap.get(pid) || 0;
+      const updatedStock = prod.currentStock + oldReturned - newDemand;
+
+      await updateDoc(doc(db, 'products', pid), {
+        currentStock: updatedStock,
+        updatedAt: now,
+      });
+    }
+
+    // 2. Delete old transactions
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < oldTx.length; i += CHUNK_SIZE) {
+      const chunk = oldTx.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const tx of chunk) {
+        batch.delete(doc(db, 'transactions', tx.id));
+      }
+      await batch.commit();
+    }
+
+    // 3. Write new transactions
+    const writeTxBatch = writeBatch(db);
+    for (const it of newItems) {
+      const prod = productMap.get(it.productId)!;
+      const oldReturned = oldReturnedMap.get(it.productId) || 0;
+      const newDemand = newDemandMap.get(it.productId) || 0;
+      const finalBal = prod.currentStock + oldReturned - newDemand;
+
+      const txId = generateId('TX-OUT-NON');
+      const txDoc: StockTransaction = {
+        id: txId,
+        productId: prod.id,
+        productName: prod.name,
+        type: 'KELUAR_NON_PENJUALAN',
+        qty: it.qty,
+        direction: 'OUT',
+        balanceAfter: finalBal,
+        date: newDate,
+        referenceNo: newSoNumber.trim(),
+        notes: newNotes.trim() || 'Pengeluaran Non-Penjualan (Diedit)',
+        source: 'NON_PENJUALAN',
+        createdBy: userEmail,
+        createdAt: now,
+      };
+      writeTxBatch.set(doc(db, 'transactions', txId), txDoc);
+    }
+    await writeTxBatch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'transactions');
+    throw err;
+  }
+}
+
 
 /**
  * Record Marketplace / Sales Upload (Shopee, TikTok, or General Sales)
