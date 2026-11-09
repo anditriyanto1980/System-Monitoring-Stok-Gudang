@@ -156,6 +156,8 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
     return transactions
       .filter((tx) => tx.date >= dateRange.startDate && tx.date <= dateRange.endDate)
       .filter((tx) => {
+        if (marketplaceFilter === 'RETUR') return tx.type === 'RETUR';
+        if (marketplaceFilter === 'MASUK') return tx.type === 'MASUK';
         if (marketplaceFilter === 'SHOPEE') return tx.type === 'KELUAR_SHOPEE';
         if (marketplaceFilter === 'TIKTOK') return tx.type === 'KELUAR_TIKTOK';
         if (marketplaceFilter === 'PENJUALAN_LAIN') return tx.type === 'KELUAR_PENJUALAN';
@@ -460,9 +462,11 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
               onChange={(e) => setMarketplaceFilter(e.target.value)}
               className="px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg text-slate-700"
             >
-              <option value="ALL">Semua Sumber</option>
-              <option value="SHOPEE">Hanya Shopee</option>
-              <option value="TIKTOK">Hanya TikTok Shop</option>
+              <option value="ALL">Semua Jenis Transaksi</option>
+              <option value="RETUR">Khusus Retur Penjualan (Kembali)</option>
+              <option value="MASUK">Penerimaan Reguler Vendor</option>
+              <option value="SHOPEE">Hanya Penjualan Shopee</option>
+              <option value="TIKTOK">Hanya Penjualan TikTok Shop</option>
               <option value="PENJUALAN_LAIN">Penjualan Lainnya</option>
               <option value="NON_PENJUALAN">Non-Penjualan</option>
             </select>
@@ -606,8 +610,18 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
                         {formatWIBDateDisplay(tx.date)}
                       </td>
                       <td className="py-2.5 px-3 whitespace-nowrap font-semibold">
-                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
-                          {tx.type}
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                            tx.type === 'RETUR'
+                              ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                              : tx.type === 'MASUK'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : tx.type.startsWith('KELUAR')
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {tx.type === 'RETUR' ? 'RETUR KONSUMEN' : tx.type}
                         </span>
                       </td>
                       <td className="py-2.5 px-3 whitespace-nowrap">
