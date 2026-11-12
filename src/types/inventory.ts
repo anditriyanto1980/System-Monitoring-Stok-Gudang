@@ -39,6 +39,7 @@ export interface StockTransaction {
   balanceAfter: number;
   date: string; // YYYY-MM-DD
   referenceNo?: string; // SO number, Order ID, Batch ID, or Doc No
+  consignmentNo?: string; // Nomor Consignment / Konsinyasi
   notes?: string;
   source: TransactionSource | string;
   batchId?: string;

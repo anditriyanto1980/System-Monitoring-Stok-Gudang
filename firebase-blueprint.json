@@ -30,6 +30,7 @@
         "balanceAfter": { "type": "number" },
         "date": { "type": "string", "maxLength": 32 },
         "referenceNo": { "type": "string", "maxLength": 128 },
+        "consignmentNo": { "type": "string", "maxLength": 128 },
         "notes": { "type": "string", "maxLength": 500 },
         "source": { "type": "string", "maxLength": 64 },
         "batchId": { "type": "string", "maxLength": 128 },

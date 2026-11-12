@@ -21,7 +21,17 @@ import {
   Loader2,
   AlertTriangle,
   X,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  CheckSquare,
+  Square,
+  MinusSquare,
+  CalendarDays,
+  SlidersHorizontal,
+  Check,
 } from 'lucide-react';
+import { exportToExcel, exportToCSV } from '../utils/exportImport';
 
 interface StokMasukViewProps {
   products: Product[];
@@ -44,9 +54,16 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
   const { user, openLoginModal } = useAuth();
   const { showToast } = useToast();
 
+  const MONTH_NAMES = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+  const AVAILABLE_YEARS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
+
   const [date, setDate] = useState<string>(getTodayWIB());
   const [type, setType] = useState<'MASUK' | 'RETUR'>('MASUK');
   const [referenceNo, setReferenceNo] = useState<string>('');
+  const [consignmentNo, setConsignmentNo] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [items, setItems] = useState<ItemEntry[]>(() => {
     if (initialProductId) {
@@ -67,8 +84,35 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
   const [editProductId, setEditProductId] = useState<string>('');
   const [editQty, setEditQty] = useState<number>(1);
   const [editRef, setEditRef] = useState<string>('');
+  const [editConsignmentNo, setEditConsignmentNo] = useState<string>('');
   const [editNotes, setEditNotes] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
+
+  // Selection state for downloading selected transactions
+  const [selectedTxIds, setSelectedTxIds] = useState<Set<string>>(new Set());
+
+  // Date / Month / Year filter states
+  const [dateFilterMode, setDateFilterMode] = useState<'ALL' | 'DATE' | 'MONTH'>('ALL');
+  const [filterDate, setFilterDate] = useState<string>(getTodayWIB());
+  const [filterMonth, setFilterMonth] = useState<number>(() => {
+    const m = Number(getTodayWIB().split('-')[1]);
+    return isNaN(m) ? 11 : m;
+  });
+  const [filterYear, setFilterYear] = useState<number>(() => {
+    const y = Number(getTodayWIB().split('-')[0]);
+    return isNaN(y) ? 2026 : y;
+  });
+
+  // Export Modal state
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [exportSource, setExportSource] = useState<'SELECTED' | 'FILTERED' | 'CUSTOM' | 'ALL'>('FILTERED');
+  const [exportPeriodMode, setExportPeriodMode] = useState<'ALL' | 'DATE' | 'MONTH' | 'RANGE'>('MONTH');
+  const [exportCustomDate, setExportCustomDate] = useState<string>(getTodayWIB());
+  const [exportCustomMonth, setExportCustomMonth] = useState<number>(() => Number(getTodayWIB().split('-')[1]) || 11);
+  const [exportCustomYear, setExportCustomYear] = useState<number>(() => Number(getTodayWIB().split('-')[0]) || 2026);
+  const [exportStartDate, setExportStartDate] = useState<string>(getTodayWIB());
+  const [exportEndDate, setExportEndDate] = useState<string>(getTodayWIB());
+  const [exportTypeFilter, setExportTypeFilter] = useState<'ALL' | 'MASUK' | 'RETUR'>('ALL');
 
   // Update selected product if initialProductId changes
   React.useEffect(() => {
@@ -80,7 +124,6 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
 
   // Filter history
   const [searchHistory, setSearchHistory] = useState<string>('');
-  const [filterDate, setFilterDate] = useState<string>('');
   const [filterType, setFilterType] = useState<'ALL' | 'MASUK' | 'RETUR'>('ALL');
 
   const activeProducts = useMemo(() => products.filter((p) => p.isActive), [products]);
@@ -104,7 +147,7 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
       .reduce((sum, tx) => sum + tx.qty, 0);
   }, [inTransactions]);
 
-  // History of stock in transactions
+  // History of stock in transactions (with date, month, year, search, and type filters)
   const stockInHistory = useMemo(() => {
     return inTransactions
       .filter((tx) => {
@@ -113,12 +156,25 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
         return true;
       })
       .filter((tx) => {
-        const matchName = tx.productName.toLowerCase().includes(searchHistory.toLowerCase());
-        const matchRef = (tx.referenceNo || '').toLowerCase().includes(searchHistory.toLowerCase());
-        const matchDate = filterDate ? tx.date === filterDate : true;
-        return (matchName || matchRef) && matchDate;
+        if (dateFilterMode === 'DATE') {
+          return filterDate ? tx.date === filterDate : true;
+        }
+        if (dateFilterMode === 'MONTH') {
+          const targetPrefix = `${filterYear}-${String(filterMonth).padStart(2, '0')}`;
+          return tx.date.startsWith(targetPrefix);
+        }
+        return true;
+      })
+      .filter((tx) => {
+        if (!searchHistory.trim()) return true;
+        const q = searchHistory.toLowerCase();
+        const matchName = tx.productName.toLowerCase().includes(q);
+        const matchRef = (tx.referenceNo || '').toLowerCase().includes(q);
+        const matchCsg = (tx.consignmentNo || '').toLowerCase().includes(q);
+        const matchNotes = (tx.notes || '').toLowerCase().includes(q);
+        return matchName || matchRef || matchCsg || matchNotes;
       });
-  }, [inTransactions, searchHistory, filterDate, filterType]);
+  }, [inTransactions, searchHistory, dateFilterMode, filterDate, filterMonth, filterYear, filterType]);
 
   const handleAddItem = () => {
     setItems((prev) => [...prev, { productId: '', qty: 1 }]);
@@ -175,7 +231,8 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
         type,
         referenceNo.trim(),
         notes.trim(),
-        user?.email || 'Staf Gudang'
+        user?.email || 'Staf Gudang',
+        consignmentNo.trim()
       );
 
       const totalQty = validItems.reduce((acc, cur) => acc + cur.qty, 0);
@@ -188,6 +245,7 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
       // Reset form
       setItems([{ productId: '', qty: 1 }]);
       setReferenceNo('');
+      setConsignmentNo('');
       setNotes('');
       await onRefreshData();
     } catch (err: any) {
@@ -205,6 +263,7 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
     setEditProductId(tx.productId);
     setEditQty(tx.qty);
     setEditRef(tx.referenceNo || '');
+    setEditConsignmentNo(tx.consignmentNo || '');
     setEditNotes(tx.notes || '');
   };
 
@@ -267,7 +326,8 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
         Number(editQty),
         editRef.trim(),
         editNotes.trim(),
-        editType
+        editType,
+        editConsignmentNo.trim()
       );
       await onRefreshData();
       showToast(
@@ -281,6 +341,145 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
     } finally {
       setIsSavingEdit(false);
     }
+  };
+
+  // Checkbox Selection Helpers
+  const isAllFilteredSelected = useMemo(() => {
+    return (
+      stockInHistory.length > 0 &&
+      stockInHistory.every((tx) => selectedTxIds.has(tx.id))
+    );
+  }, [stockInHistory, selectedTxIds]);
+
+  const handleToggleSelectAll = () => {
+    if (isAllFilteredSelected) {
+      setSelectedTxIds(new Set());
+    } else {
+      setSelectedTxIds(new Set(stockInHistory.map((tx) => tx.id)));
+    }
+  };
+
+  const handleToggleSelectTx = (id: string) => {
+    setSelectedTxIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Format Data Rows for Excel / CSV Export
+  const formatRowsForExport = (txList: StockTransaction[]) => {
+    return txList.map((tx, idx) => ({
+      No: idx + 1,
+      Tanggal: formatWIBDateDisplay(tx.date),
+      'No. Consignment': tx.consignmentNo || '-',
+      'No. Dokumen / PO / Ref / Resi': tx.referenceNo || '-',
+      'Tipe Transaksi': tx.type === 'RETUR' ? 'RETUR KONSUMEN' : 'PENERIMAAN REGULER (VENDOR)',
+      'ID Barang': tx.productId,
+      'Nama Barang': tx.productName,
+      'Qty Masuk (Unit)': tx.qty,
+      'Saldo Sesudah (Unit)': tx.balanceAfter,
+      Petugas: tx.createdBy || '-',
+      'Catatan / Keterangan': tx.notes || '-',
+      'Waktu Pencatatan': tx.createdAt ? formatWIBDateDisplay(tx.createdAt) : '-',
+    }));
+  };
+
+  // Quick Export Selected
+  const handleExportSelected = () => {
+    const list = inTransactions.filter((tx) => selectedTxIds.has(tx.id));
+    if (list.length === 0) {
+      showToast('warning', 'Tidak Ada Data Terpilih', 'Silakan centang minimal 1 transaksi di tabel.');
+      return;
+    }
+    const data = formatRowsForExport(list);
+    exportToExcel(data, 'Penerimaan Stok', `Laporan_Penerimaan_Stok_Terpilih_${Date.now()}`);
+    showToast('success', 'Excel Berhasil Diunduh', `Berhasil mengunduh ${data.length} transaksi terpilih.`);
+  };
+
+  // Quick Export Filtered View
+  const handleExportFiltered = () => {
+    if (stockInHistory.length === 0) {
+      showToast('warning', 'Data Kosong', 'Tidak ada data transaksi yang cocok dengan filter saat ini.');
+      return;
+    }
+    const data = formatRowsForExport(stockInHistory);
+    let label = 'Laporan_Penerimaan_Stok';
+    if (dateFilterMode === 'DATE') {
+      label += `_${filterDate}`;
+    } else if (dateFilterMode === 'MONTH') {
+      label += `_${MONTH_NAMES[filterMonth - 1]}_${filterYear}`;
+    }
+    exportToExcel(data, 'Penerimaan Stok', `${label}_${Date.now()}`);
+    showToast('success', 'Excel Berhasil Diunduh', `Berhasil mengunduh ${data.length} baris laporan penerimaan stok.`);
+  };
+
+  // Export Modal Data Resolver
+  const getModalExportList = (): StockTransaction[] => {
+    let list = inTransactions;
+
+    if (exportSource === 'SELECTED') {
+      list = inTransactions.filter((tx) => selectedTxIds.has(tx.id));
+    } else if (exportSource === 'FILTERED') {
+      list = stockInHistory;
+    } else if (exportSource === 'CUSTOM') {
+      // Period
+      if (exportPeriodMode === 'DATE') {
+        list = list.filter((tx) => tx.date === exportCustomDate);
+      } else if (exportPeriodMode === 'MONTH') {
+        const prefix = `${exportCustomYear}-${String(exportCustomMonth).padStart(2, '0')}`;
+        list = list.filter((tx) => tx.date.startsWith(prefix));
+      } else if (exportPeriodMode === 'RANGE') {
+        list = list.filter((tx) => tx.date >= exportStartDate && tx.date <= exportEndDate);
+      }
+      // Type
+      if (exportTypeFilter === 'MASUK') {
+        list = list.filter((tx) => tx.type === 'MASUK');
+      } else if (exportTypeFilter === 'RETUR') {
+        list = list.filter((tx) => tx.type === 'RETUR');
+      }
+    } else if (exportSource === 'ALL') {
+      if (exportTypeFilter === 'MASUK') {
+        list = list.filter((tx) => tx.type === 'MASUK');
+      } else if (exportTypeFilter === 'RETUR') {
+        list = list.filter((tx) => tx.type === 'RETUR');
+      }
+    }
+
+    return list;
+  };
+
+  // Export from Modal
+  const handleExecuteModalExport = (format: 'EXCEL' | 'CSV') => {
+    const list = getModalExportList();
+    if (list.length === 0) {
+      showToast('warning', 'Data Kosong', 'Tidak ada data transaksi yang cocok dengan kriteria ekspor yang dipilih.');
+      return;
+    }
+
+    const data = formatRowsForExport(list);
+    let filename = 'Laporan_Penerimaan_Stok';
+    if (exportSource === 'SELECTED') {
+      filename += `_Terpilih_${list.length}_Item`;
+    } else if (exportSource === 'CUSTOM') {
+      if (exportPeriodMode === 'DATE') filename += `_${exportCustomDate}`;
+      else if (exportPeriodMode === 'MONTH') filename += `_${MONTH_NAMES[exportCustomMonth - 1]}_${exportCustomYear}`;
+      else if (exportPeriodMode === 'RANGE') filename += `_${exportStartDate}_sd_${exportEndDate}`;
+    } else if (exportSource === 'FILTERED') {
+      if (dateFilterMode === 'DATE') filename += `_${filterDate}`;
+      else if (dateFilterMode === 'MONTH') filename += `_${MONTH_NAMES[filterMonth - 1]}_${filterYear}`;
+    }
+
+    if (format === 'EXCEL') {
+      exportToExcel(data, 'Penerimaan Stok', `${filename}_${Date.now()}`);
+      showToast('success', 'Laporan Excel Berhasil Diunduh', `Berhasil mengekspor ${data.length} transaksi penerimaan stok.`);
+    } else {
+      exportToCSV(data, `${filename}_${Date.now()}`);
+      showToast('success', 'Laporan CSV Berhasil Diunduh', `Berhasil mengekspor ${data.length} transaksi penerimaan stok.`);
+    }
+
+    setShowExportModal(false);
   };
 
   return (
@@ -367,7 +566,8 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
             {/* Tanggal Transaksi */}
             <div>
               <label className="block font-semibold text-slate-700 mb-1">
-                Tanggal Barang Diterima Kembali <span className="text-rose-500">*</span>
+                {type === 'RETUR' ? 'Tanggal Barang Diterima Kembali' : 'Tanggal Barang Diterima di Gudang'}{' '}
+                <span className="text-rose-500">*</span>
               </label>
               <input
                 type="date"
@@ -376,6 +576,28 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
                 onChange={(e) => setDate(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:border-blue-500 text-slate-800"
               />
+            </div>
+
+            {/* Nomor Consignment (Konsinyasi) */}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                <span>Nomor Consignment (Konsinyasi)</span>
+                {type === 'MASUK' && (
+                  <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                    Penerimaan Reguler
+                  </span>
+                )}
+              </label>
+              <input
+                type="text"
+                placeholder="Contoh: CSG-2026-001 / NO-KONSINYASI-99"
+                value={consignmentNo}
+                onChange={(e) => setConsignmentNo(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:border-indigo-500 text-slate-800 font-mono text-xs"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Nomor identitas konsinyasi / consignment penerimaan barang dari vendor partner
+              </p>
             </div>
 
             {/* Nomor Dokumen / Referensi */}
@@ -516,81 +738,241 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
         {/* History Table (7 cols) */}
         <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col overflow-hidden">
           <div className="p-4 border-b border-slate-200 flex flex-col gap-3">
+            {/* Header Title & Export Action Button */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-bold text-slate-800">Riwayat Stok Masuk & Retur</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-800">Riwayat Stok Masuk & Consignment</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                    {stockInHistory.length} data
+                  </span>
+                </div>
                 <p className="text-[11px] text-slate-500">
-                  Semua catatan penambahan stok dan pengembalian barang tersimpan permanen
+                  Catatan penerimaan stok vendor, pengembalian retur, dan nomor konsinyasi
                 </p>
               </div>
+
+              {/* Action Buttons: Download Excel / Modal Export */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowExportModal(true)}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  title="Buka Menu Download Laporan Excel Berdasarkan Kriteria Tanggal / Pilihan"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Download Laporan Excel</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Toolbar: Mode Periode & Search */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pt-2 border-t border-slate-100">
+              {/* Period Filter Modes: Semua Waktu, Per Tanggal, Per Bulan */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
+                  <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
+                  Periode:
+                </span>
+                <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setDateFilterMode('ALL')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
+                      dateFilterMode === 'ALL'
+                        ? 'bg-white text-slate-800 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Semua Waktu
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDateFilterMode('DATE')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
+                      dateFilterMode === 'DATE'
+                        ? 'bg-white text-slate-800 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Per Tanggal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDateFilterMode('MONTH')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
+                      dateFilterMode === 'MONTH'
+                        ? 'bg-white text-slate-800 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Per Bulan & Tahun
+                  </button>
+                </div>
+
+                {/* Specific Date Picker */}
+                {dateFilterMode === 'DATE' && (
+                  <input
+                    type="date"
+                    value={filterDate}
+                    onChange={(e) => setFilterDate(e.target.value)}
+                    className="px-2.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden font-medium text-slate-700 ml-1"
+                  />
+                )}
+
+                {/* Month & Year Selectors */}
+                {dateFilterMode === 'MONTH' && (
+                  <div className="flex items-center gap-1 ml-1">
+                    <select
+                      value={filterMonth}
+                      onChange={(e) => setFilterMonth(Number(e.target.value))}
+                      className="px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-hidden"
+                    >
+                      {MONTH_NAMES.map((m, idx) => (
+                        <option key={m} value={idx + 1}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={filterYear}
+                      onChange={(e) => setFilterYear(Number(e.target.value))}
+                      className="px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-hidden"
+                    >
+                      {AVAILABLE_YEARS.map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Search Box */}
               <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  placeholder="Cari barang / ref..."
+                  placeholder="Cari barang / ref / consignment..."
                   value={searchHistory}
                   onChange={(e) => setSearchHistory(e.target.value)}
-                  className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg w-36 focus:outline-hidden"
-                />
-                <input
-                  type="date"
-                  value={filterDate}
-                  onChange={(e) => setFilterDate(e.target.value)}
-                  className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden"
+                  className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg w-full sm:w-56 focus:bg-white focus:outline-hidden focus:border-blue-400"
                 />
               </div>
             </div>
 
             {/* Quick Filter Tabs: All, Reguler, Retur */}
-            <div className="flex items-center gap-2 pt-1 border-t border-slate-100 text-xs">
-              <span className="text-[11px] text-slate-400 font-medium">Filter Tipe:</span>
-              <button
-                type="button"
-                onClick={() => setFilterType('ALL')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
-                  filterType === 'ALL'
-                    ? 'bg-slate-800 text-white font-bold'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Semua ({inTransactions.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterType('MASUK')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
-                  filterType === 'MASUK'
-                    ? 'bg-emerald-600 text-white font-bold'
-                    : 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
-                }`}
-              >
-                Reguler ({regularInCount})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterType('RETUR')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1 ${
-                  filterType === 'RETUR'
-                    ? 'bg-blue-600 text-white font-bold'
-                    : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                }`}
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Khusus Retur Konsumen ({returCount})</span>
-                {totalReturQty > 0 && (
-                  <span className="ml-1 text-[10px] px-1 rounded-sm bg-white/20">
-                    +{totalReturQty} pcs
-                  </span>
-                )}
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100 text-xs">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] text-slate-400 font-medium">Tipe:</span>
+                <button
+                  type="button"
+                  onClick={() => setFilterType('ALL')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                    filterType === 'ALL'
+                      ? 'bg-slate-800 text-white font-bold'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Semua ({inTransactions.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterType('MASUK')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                    filterType === 'MASUK'
+                      ? 'bg-emerald-600 text-white font-bold'
+                      : 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+                  }`}
+                >
+                  Reguler ({regularInCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterType('RETUR')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1 ${
+                    filterType === 'RETUR'
+                      ? 'bg-blue-600 text-white font-bold'
+                      : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                  }`}
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Khusus Retur ({returCount})</span>
+                  {totalReturQty > 0 && (
+                    <span className="ml-1 text-[10px] px-1 rounded-sm bg-white/20">
+                      +{totalReturQty} pcs
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Quick Export Current Filtered button */}
+              {stockInHistory.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleExportFiltered}
+                  className="text-[11px] font-semibold text-slate-600 hover:text-emerald-700 inline-flex items-center gap-1 hover:underline"
+                  title="Unduh data yang sedang tampil di tabel langsung ke Excel"
+                >
+                  <Download className="w-3 h-3 text-emerald-600" />
+                  <span>Unduh Tampilan Ini ({stockInHistory.length})</span>
+                </button>
+              )}
             </div>
+
+            {/* Selected Items Action Banner */}
+            {selectedTxIds.size > 0 && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 text-indigo-900 font-medium">
+                  <CheckSquare className="w-4 h-4 text-indigo-600" />
+                  <span>
+                    <strong>{selectedTxIds.size} transaksi</strong> dipilih dari tabel
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportSelected}
+                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Download Excel ({selectedTxIds.size} Terpilih)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTxIds(new Set())}
+                    className="px-2 py-1 text-slate-500 hover:text-slate-700 text-xs hover:underline cursor-pointer"
+                  >
+                    Batal Pilih
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider">
                 <tr>
+                  <th className="py-2.5 px-3 w-8 text-center">
+                    <button
+                      type="button"
+                      onClick={handleToggleSelectAll}
+                      className="text-slate-400 hover:text-slate-700 transition-colors inline-flex items-center justify-center"
+                      title={isAllFilteredSelected ? 'Batalkan pilih semua' : 'Pilih semua di tampilan ini'}
+                    >
+                      {isAllFilteredSelected ? (
+                        <CheckSquare className="w-4 h-4 text-indigo-600" />
+                      ) : selectedTxIds.size > 0 ? (
+                        <MinusSquare className="w-4 h-4 text-indigo-600" />
+                      ) : (
+                        <Square className="w-4 h-4 text-slate-300" />
+                      )}
+                    </button>
+                  </th>
                   <th className="py-2.5 px-3">Tanggal</th>
                   <th className="py-2.5 px-3">Tipe</th>
+                  <th className="py-2.5 px-3">No. Consignment</th>
                   <th className="py-2.5 px-3">Nama Barang</th>
                   <th className="py-2.5 px-3 text-right">Qty Masuk</th>
                   <th className="py-2.5 px-3 text-right">Saldo Sesudah</th>
@@ -601,66 +983,97 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {stockInHistory.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-400">
-                      Belum ada transaksi stok masuk yang tercatat.
+                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                      Belum ada transaksi stok masuk yang cocok dengan filter.
                     </td>
                   </tr>
                 ) : (
-                  stockInHistory.map((tx) => (
-                    <tr key={tx.id} className="hover:bg-slate-50/70">
-                      <td className="py-2.5 px-3 whitespace-nowrap text-slate-600 font-mono text-[11px]">
-                        {formatWIBDateDisplay(tx.date)}
-                      </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                            tx.type === 'RETUR'
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-emerald-100 text-emerald-800'
-                          }`}
-                        >
-                          {tx.type === 'RETUR' ? 'RETUR' : 'MASUK'}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 font-medium text-slate-900">{tx.productName}</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-emerald-600">
-                        +{tx.qty.toLocaleString()}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono text-slate-800">
-                        {tx.balanceAfter.toLocaleString()}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-500 max-w-[160px] truncate">
-                        {tx.referenceNo && (
-                          <span className="font-semibold text-slate-700 block text-[11px]">
-                            {tx.referenceNo}
+                  stockInHistory.map((tx) => {
+                    const isSelected = selectedTxIds.has(tx.id);
+                    return (
+                      <tr
+                        key={tx.id}
+                        className={`hover:bg-slate-50/80 transition-colors ${
+                          isSelected ? 'bg-indigo-50/40' : ''
+                        }`}
+                      >
+                        <td className="py-2.5 px-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSelectTx(tx.id)}
+                            className="text-slate-400 hover:text-slate-700 transition-colors inline-flex items-center justify-center cursor-pointer"
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="w-4 h-4 text-indigo-600" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-300 hover:text-slate-400" />
+                            )}
+                          </button>
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap text-slate-600 font-mono text-[11px]">
+                          {formatWIBDateDisplay(tx.date)}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                              tx.type === 'RETUR'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            {tx.type === 'RETUR' ? 'RETUR' : 'MASUK'}
                           </span>
-                        )}
-                        <span className="text-[10px]">{tx.notes || '-'}</span>
-                      </td>
-                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(tx)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-blue-600 hover:text-blue-700 hover:bg-blue-50 text-[11px] font-semibold transition-colors"
-                            title="Edit Transaksi Ini"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            <span>Edit</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setTxToDelete(tx)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-rose-600 hover:text-rose-700 hover:bg-rose-50 text-[11px] font-semibold transition-colors"
-                            title="Hapus Transaksi & Tarik dari Stok"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Hapus</span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          {tx.consignmentNo ? (
+                            <span className="inline-flex items-center gap-1 font-mono text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-md">
+                              <FileText className="w-3 h-3 text-indigo-500 shrink-0" />
+                              <span>{tx.consignmentNo}</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-300 text-[11px]">-</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 font-medium text-slate-900">{tx.productName}</td>
+                        <td className="py-2.5 px-3 text-right font-bold text-emerald-600">
+                          +{tx.qty.toLocaleString()}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-slate-800">
+                          {tx.balanceAfter.toLocaleString()}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-500 max-w-[160px] truncate">
+                          {tx.referenceNo && (
+                            <span className="font-semibold text-slate-700 block text-[11px]">
+                              {tx.referenceNo}
+                            </span>
+                          )}
+                          <span className="text-[10px]">{tx.notes || '-'}</span>
+                        </td>
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditModal(tx)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-blue-600 hover:text-blue-700 hover:bg-blue-50 text-[11px] font-semibold transition-colors"
+                              title="Edit Transaksi Ini"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTxToDelete(tx)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-rose-600 hover:text-rose-700 hover:bg-rose-50 text-[11px] font-semibold transition-colors"
+                              title="Hapus Transaksi & Tarik dari Stok"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Hapus</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -902,6 +1315,19 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nomor Consignment (Konsinyasi)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: CSG-2026-0089 (Kosongkan jika bukan barang konsinyasi)"
+                  value={editConsignmentNo}
+                  onChange={(e) => setEditConsignmentNo(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-medium focus:bg-white focus:outline-hidden focus:border-blue-500 text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Catatan / Keterangan
                 </label>
                 <textarea
@@ -932,6 +1358,7 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
                 <button
                   type="submit"
                   disabled={isSavingEdit}
+                  onClick={handleSaveEdit}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
                 >
                   {isSavingEdit ? (
@@ -951,6 +1378,369 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Download Laporan Excel / CSV Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-emerald-50/60">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">
+                    Download Laporan Stok Masuk & Consignment
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Ekspor ke Excel (.xlsx) atau CSV sesuai tanggal, bulan, tahun, atau data terpilih
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+              {/* Step 1: Sumber Data */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-2">
+                  1. Pilih Sumber / Cakupan Data:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {/* Option: Current Filtered */}
+                  <label
+                    className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-all ${
+                      exportSource === 'FILTERED'
+                        ? 'border-emerald-500 bg-emerald-50/50 shadow-xs'
+                        : 'border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="exportSource"
+                      checked={exportSource === 'FILTERED'}
+                      onChange={() => setExportSource('FILTERED')}
+                      className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-slate-800 block">Sesuai Filter Tabel</span>
+                      <span className="text-[11px] text-slate-500 block">
+                        {stockInHistory.length} data yang sedang tampil
+                      </span>
+                    </div>
+                  </label>
+
+                  {/* Option: Selected rows */}
+                  <label
+                    className={`p-3 rounded-xl border flex items-start gap-2.5 transition-all ${
+                      selectedTxIds.size === 0
+                        ? 'opacity-50 cursor-not-allowed border-slate-200 bg-slate-50/50'
+                        : exportSource === 'SELECTED'
+                        ? 'border-indigo-500 bg-indigo-50/50 shadow-xs cursor-pointer'
+                        : 'border-slate-200 hover:bg-slate-50 cursor-pointer'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="exportSource"
+                      disabled={selectedTxIds.size === 0}
+                      checked={exportSource === 'SELECTED'}
+                      onChange={() => setExportSource('SELECTED')}
+                      className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-slate-800 block">Data yang Dicentang</span>
+                      <span className="text-[11px] text-slate-500 block">
+                        {selectedTxIds.size > 0
+                          ? `${selectedTxIds.size} baris terpilih`
+                          : 'Centang di tabel dulu'}
+                      </span>
+                    </div>
+                  </label>
+
+                  {/* Option: Custom Date/Month/Range */}
+                  <label
+                    className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-all ${
+                      exportSource === 'CUSTOM'
+                        ? 'border-emerald-500 bg-emerald-50/50 shadow-xs'
+                        : 'border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="exportSource"
+                      checked={exportSource === 'CUSTOM'}
+                      onChange={() => setExportSource('CUSTOM')}
+                      className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-slate-800 block">Pilih Tanggal / Bulan</span>
+                      <span className="text-[11px] text-slate-500 block">
+                        Tentukan tanggal, bulan, atau rentang
+                      </span>
+                    </div>
+                  </label>
+
+                  {/* Option: All Data */}
+                  <label
+                    className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-all ${
+                      exportSource === 'ALL'
+                        ? 'border-emerald-500 bg-emerald-50/50 shadow-xs'
+                        : 'border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="exportSource"
+                      checked={exportSource === 'ALL'}
+                      onChange={() => setExportSource('ALL')}
+                      className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-slate-800 block">Semua Riwayat</span>
+                      <span className="text-[11px] text-slate-500 block">
+                        Total {inTransactions.length} transaksi stok masuk
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Step 2: Custom Filter Options (Conditional) */}
+              {exportSource === 'CUSTOM' && (
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3 animate-in fade-in duration-100">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Pilihan Periode Waktu:
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setExportPeriodMode('DATE')}
+                        className={`py-1.5 px-2 rounded-lg font-semibold transition-all text-center ${
+                          exportPeriodMode === 'DATE'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        Per Tanggal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExportPeriodMode('MONTH')}
+                        className={`py-1.5 px-2 rounded-lg font-semibold transition-all text-center ${
+                          exportPeriodMode === 'MONTH'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        Per Bulan & Tahun
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExportPeriodMode('RANGE')}
+                        className={`py-1.5 px-2 rounded-lg font-semibold transition-all text-center ${
+                          exportPeriodMode === 'RANGE'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        Rentang Tanggal
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Date Input */}
+                  {exportPeriodMode === 'DATE' && (
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                        Pilih Tanggal:
+                      </label>
+                      <input
+                        type="date"
+                        value={exportCustomDate}
+                        onChange={(e) => setExportCustomDate(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-hidden focus:border-emerald-500"
+                      />
+                    </div>
+                  )}
+
+                  {/* Month & Year Selectors */}
+                  {exportPeriodMode === 'MONTH' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                          Bulan:
+                        </label>
+                        <select
+                          value={exportCustomMonth}
+                          onChange={(e) => setExportCustomMonth(Number(e.target.value))}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-hidden focus:border-emerald-500"
+                        >
+                          {MONTH_NAMES.map((m, idx) => (
+                            <option key={m} value={idx + 1}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                          Tahun:
+                        </label>
+                        <select
+                          value={exportCustomYear}
+                          onChange={(e) => setExportCustomYear(Number(e.target.value))}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-hidden focus:border-emerald-500"
+                        >
+                          {AVAILABLE_YEARS.map((y) => (
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Range Inputs */}
+                  {exportPeriodMode === 'RANGE' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                          Dari Tanggal:
+                        </label>
+                        <input
+                          type="date"
+                          value={exportStartDate}
+                          onChange={(e) => setExportStartDate(e.target.value)}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-hidden focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                          Sampai Tanggal:
+                        </label>
+                        <input
+                          type="date"
+                          value={exportEndDate}
+                          onChange={(e) => setExportEndDate(e.target.value)}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-hidden focus:border-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Filter Type */}
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                      Filter Jenis Transaksi:
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setExportTypeFilter('ALL')}
+                        className={`py-1 rounded-md font-medium text-xs ${
+                          exportTypeFilter === 'ALL'
+                            ? 'bg-slate-800 text-white font-bold'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        Semua
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExportTypeFilter('MASUK')}
+                        className={`py-1 rounded-md font-medium text-xs ${
+                          exportTypeFilter === 'MASUK'
+                            ? 'bg-emerald-600 text-white font-bold'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        Reguler Saja
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExportTypeFilter('RETUR')}
+                        className={`py-1 rounded-md font-medium text-xs ${
+                          exportTypeFilter === 'RETUR'
+                            ? 'bg-blue-600 text-white font-bold'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        Retur Saja
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Data Preview Summary */}
+              {(() => {
+                const previewList = getModalExportList();
+                const totalExportQty = previewList.reduce((acc, curr) => acc + curr.qty, 0);
+                const hasConsignment = previewList.filter((tx) => Boolean(tx.consignmentNo)).length;
+
+                return (
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs">
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>Total Data Cocok:</span>
+                      <span className="font-bold text-slate-900 font-mono text-sm">
+                        {previewList.length} transaksi
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>Total Kuantitas Masuk:</span>
+                      <span className="font-bold text-emerald-600 font-mono">
+                        +{totalExportQty.toLocaleString()} unit
+                      </span>
+                    </div>
+                    {hasConsignment > 0 && (
+                      <div className="flex justify-between items-center text-slate-600">
+                        <span>Transaksi Ber-Consignment:</span>
+                        <span className="font-bold text-indigo-600 font-mono">
+                          {hasConsignment} transaksi
+                        </span>
+                      </div>
+                    )}
+                    <div className="pt-2 border-t border-slate-200 text-[11px] text-slate-500">
+                      Laporan mencakup kolom: <em>No, Tanggal, No. Consignment, No. Dokumen / Ref / Resi, Tipe Transaksi, ID Barang, Nama Barang, Qty Masuk, Saldo Sesudah, Petugas, Catatan</em>.
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Action Buttons */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleExecuteModalExport('EXCEL')}
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Download Excel (.xlsx)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExecuteModalExport('CSV')}
+                  className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Download CSV (.csv)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

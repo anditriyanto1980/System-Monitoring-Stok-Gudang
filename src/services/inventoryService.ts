@@ -354,7 +354,8 @@ export async function recordStockIn(
   type: 'MASUK' | 'RETUR',
   referenceNo: string = '',
   notes: string = '',
-  userEmail: string
+  userEmail: string,
+  consignmentNo: string = ''
 ): Promise<void> {
   if (items.length === 0) throw new Error('Tidak ada barang yang dipilih.');
   const now = new Date().toISOString();
@@ -400,6 +401,7 @@ export async function recordStockIn(
           balanceAfter: newBalance,
           date,
           referenceNo: referenceNo || (type === 'RETUR' ? 'RETUR-MASUK' : 'STOK-MASUK'),
+          consignmentNo: consignmentNo.trim() || undefined,
           notes: notes || (type === 'RETUR' ? 'Pengembalian / Retur Penjualan' : 'Penerimaan Stok Gudang'),
           source: type === 'RETUR' ? 'RETUR' : 'PEMBELIAN',
           createdBy: userEmail,
@@ -481,7 +483,8 @@ export async function updateStockInTransaction(
   newQty: number,
   newReferenceNo: string,
   newNotes: string,
-  newType: 'MASUK' | 'RETUR'
+  newType: 'MASUK' | 'RETUR',
+  newConsignmentNo: string = ''
 ): Promise<void> {
   if (newQty <= 0) throw new Error('Kuantitas harus lebih besar dari 0.');
 
@@ -526,6 +529,7 @@ export async function updateStockInTransaction(
         qty: newQty,
         type: newType,
         referenceNo: newReferenceNo.trim(),
+        consignmentNo: newConsignmentNo.trim() || '',
         notes: newNotes.trim(),
         source: newType === 'RETUR' ? 'RETUR' : 'PEMBELIAN',
         balanceAfter: updatedStock,
@@ -574,6 +578,7 @@ export async function updateStockInTransaction(
         qty: newQty,
         type: newType,
         referenceNo: newReferenceNo.trim(),
+        consignmentNo: newConsignmentNo.trim() || '',
         notes: newNotes.trim(),
         source: newType === 'RETUR' ? 'RETUR' : 'PEMBELIAN',
         balanceAfter: updatedNewStock,

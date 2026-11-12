@@ -33,7 +33,8 @@ service cloud.firestore {
         && data.direction is string && data.direction.size() <= 16
         && data.balanceAfter is number
         && data.date is string && data.date.size() <= 32
-        && data.source is string && data.source.size() <= 64;
+        && data.source is string && data.source.size() <= 64
+        && (!('consignmentNo' in data) || (data.consignmentNo is string && data.consignmentNo.size() <= 128));
     }
 
     function isValidProductMapping(data) {
