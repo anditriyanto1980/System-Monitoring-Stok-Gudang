@@ -136,6 +136,10 @@ function WarehouseApp() {
                     products={products}
                     transactions={transactions}
                     onNavigateTab={setCurrentTab}
+                    onNavigateToRestock={(pId) => {
+                      setRestockProductId(pId);
+                      setCurrentTab('stok-masuk');
+                    }}
                     onRefreshData={loadData}
                   />
                 )}
@@ -201,6 +205,10 @@ function WarehouseApp() {
                     products={products}
                     transactions={transactions}
                     batches={batches}
+                    onNavigateToRestock={(pId) => {
+                      setRestockProductId(pId);
+                      setCurrentTab('stok-masuk');
+                    }}
                     onRefreshData={loadData}
                   />
                 )}

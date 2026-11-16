@@ -147,3 +147,37 @@ export function getDateRangeForPeriod(period: PeriodFilter, customStart?: string
     }
   }
 }
+
+/**
+ * Subtract N days from a YYYY-MM-DD date string using UTC calendar math
+ */
+export function subtractDaysWIB(isoDateStr: string, days: number): string {
+  const clean = (isoDateStr || getTodayWIB()).split('T')[0];
+  const parts = clean.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) {
+    return getTodayWIB();
+  }
+  const [y, m, d] = parts;
+  const dt = new Date(Date.UTC(y, m - 1, d - days));
+  const year = dt.getUTCFullYear();
+  const month = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(dt.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Calculate integer calendar day difference (toDate - fromDate) for YYYY-MM-DD strings
+ */
+export function diffDaysWIB(fromDateStr: string, toDateStr: string): number {
+  const cleanFrom = (fromDateStr || '').split('T')[0];
+  const cleanTo = (toDateStr || '').split('T')[0];
+  const p1 = cleanFrom.split('-').map(Number);
+  const p2 = cleanTo.split('-').map(Number);
+  if (p1.length !== 3 || p2.length !== 3 || p1.some(isNaN) || p2.some(isNaN)) {
+    return 0;
+  }
+  const d1 = Date.UTC(p1[0], p1[1] - 1, p1[2]);
+  const d2 = Date.UTC(p2[0], p2[1] - 1, p2[2]);
+  return Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
+}
+

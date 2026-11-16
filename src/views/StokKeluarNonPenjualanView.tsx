@@ -22,6 +22,7 @@ import {
   Loader2,
   AlertTriangle,
 } from 'lucide-react';
+import { ProductCombobox } from '../components/ProductCombobox';
 
 interface StokKeluarNonPenjualanViewProps {
   products: Product[];
@@ -418,7 +419,7 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
                 </button>
               </div>
 
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              <div className="space-y-2.5">
                 {items.map((it, idx) => {
                   const selectedProd = products.find((p) => p.id === it.productId);
                   const isInsufficient = selectedProd && selectedProd.currentStock < (Number(it.qty) || 0);
@@ -426,27 +427,23 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
                   return (
                     <div
                       key={idx}
-                      className={`p-2.5 rounded-xl border transition-all ${
+                      className={`p-2.5 rounded-xl border relative transition-all ${
                         isInsufficient
                           ? 'bg-rose-50 border-rose-300'
                           : 'bg-slate-50 border-slate-200'
                       }`}
+                      style={{ zIndex: (items.length - idx) * 5 + 10 }}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-start gap-2">
                         <div className="flex-1 min-w-0">
-                          <select
+                          <ProductCombobox
                             required
+                            products={activeProducts}
                             value={it.productId}
-                            onChange={(e) => handleItemChange(idx, 'productId', e.target.value)}
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:outline-hidden text-slate-800"
-                          >
-                            <option value="">-- Pilih Barang --</option>
-                            {activeProducts.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} (Tersedia: {p.currentStock})
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(val) => handleItemChange(idx, 'productId', val)}
+                            placeholder="Ketik nama barang / SKU..."
+                            stockPrefix="Tersedia"
+                          />
                         </div>
 
                         <div className="w-24 shrink-0">
@@ -896,30 +893,26 @@ export const StokKeluarNonPenjualanView: React.FC<StokKeluarNonPenjualanViewProp
                   </button>
                 </div>
 
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                <div className="space-y-2.5">
                   {editItems.map((it, idx) => {
                     const selectedProd = products.find((p) => p.id === it.productId);
                     return (
                       <div
                         key={idx}
-                        className="flex items-center gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200"
+                        className="flex items-start gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 relative"
+                        style={{ zIndex: (editItems.length - idx) * 5 + 10 }}
                       >
                         <div className="flex-1 min-w-0">
-                          <select
+                          <ProductCombobox
                             required
+                            products={activeProducts}
                             value={it.productId}
-                            onChange={(e) => handleEditItemChange(idx, 'productId', e.target.value)}
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-800 focus:outline-hidden"
-                          >
-                            <option value="">-- Pilih Barang --</option>
-                            {activeProducts.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} (Stok Saat Ini: {p.currentStock})
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(val) => handleEditItemChange(idx, 'productId', val)}
+                            placeholder="Ketik nama barang / SKU..."
+                            stockPrefix="Stok gudang"
+                          />
                           {selectedProd && (
-                            <p className="text-[10px] text-slate-500 mt-0.5">
+                            <p className="text-[10px] text-slate-500 mt-1 pl-1">
                               Stok saat ini: {selectedProd.currentStock} unit
                             </p>
                           )}

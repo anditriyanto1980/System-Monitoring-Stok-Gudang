@@ -24,13 +24,16 @@ import {
   Boxes,
   Eye,
   ShoppingBag,
+  TrendingUp,
 } from 'lucide-react';
 import { BatchDetailModal } from '../components/BatchDetailModal';
+import { StockAnalyticsPanel } from '../components/StockAnalyticsPanel';
 
 interface LaporanStokViewProps {
   products: Product[];
   transactions: StockTransaction[];
   batches?: ImportBatch[];
+  onNavigateToRestock?: (productId: string) => void;
   onRefreshData: () => Promise<void>;
 }
 
@@ -38,13 +41,14 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
   products,
   transactions,
   batches = [],
+  onNavigateToRestock,
   onRefreshData,
 }) => {
   const [period, setPeriod] = useState<PeriodFilter>('THIS_MONTH');
   const [customStart, setCustomStart] = useState<string>(getTodayWIB());
   const [customEnd, setCustomEnd] = useState<string>(getTodayWIB());
   const [search, setSearch] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'SUMMARY' | 'DETAIL' | 'BATCHES'>('SUMMARY');
+  const [activeTab, setActiveTab] = useState<'SUMMARY' | 'DETAIL' | 'BATCHES' | 'ANALYTICS'>('SUMMARY');
   const [marketplaceFilter, setMarketplaceFilter] = useState<string>('ALL');
   const [selectedBatchForDetail, setSelectedBatchForDetail] = useState<ImportBatch | null>(null);
 
@@ -360,81 +364,85 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
             Laporan lengkap pergerakan persediaan: Saldo Awal + Masuk - Shopee - TikTok - Lainnya - Non-Penjualan + Penyesuaian = Stok Akhir
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={handleExportExcel}
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-all"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Excel (.xlsx)</span>
-          </button>
-          <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>CSV</span>
-          </button>
-          <button
-            onClick={handleExportPDF}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-all"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Cetak PDF</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Period Filter Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-blue-600" />
-            <span className="text-xs font-semibold text-slate-700">Periode Laporan:</span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
-            {[
-              { id: 'TODAY' as PeriodFilter, label: 'Harian (Hari Ini)' },
-              { id: 'THIS_WEEK' as PeriodFilter, label: 'Mingguan (Senin-Minggu)' },
-              { id: 'THIS_MONTH' as PeriodFilter, label: 'Bulanan' },
-              { id: 'THIS_YEAR' as PeriodFilter, label: 'Tahunan' },
-              { id: 'CUSTOM' as PeriodFilter, label: 'Rentang Khusus' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setPeriod(tab.id)}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                  period === tab.id
-                    ? 'bg-white text-blue-700 shadow-xs font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {period === 'CUSTOM' && (
-          <div className="flex items-center gap-3 pt-2 border-t border-slate-100 text-xs">
-            <span className="font-medium text-slate-600">Dari Tanggal:</span>
-            <input
-              type="date"
-              value={customStart}
-              onChange={(e) => setCustomStart(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-slate-800"
-            />
-            <span className="text-slate-400">s/d</span>
-            <input
-              type="date"
-              value={customEnd}
-              onChange={(e) => setCustomEnd(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-slate-800"
-            />
+        {activeTab !== 'ANALYTICS' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Excel (.xlsx)</span>
+            </button>
+            <button
+              onClick={handleExportCSV}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>CSV</span>
+            </button>
+            <button
+              onClick={handleExportPDF}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-all"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Cetak PDF</span>
+            </button>
           </div>
         )}
       </div>
+
+      {/* Period Filter Bar */}
+      {activeTab !== 'ANALYTICS' && (
+        <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-600" />
+              <span className="text-xs font-semibold text-slate-700">Periode Laporan:</span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
+              {[
+                { id: 'TODAY' as PeriodFilter, label: 'Harian (Hari Ini)' },
+                { id: 'THIS_WEEK' as PeriodFilter, label: 'Mingguan (Senin-Minggu)' },
+                { id: 'THIS_MONTH' as PeriodFilter, label: 'Bulanan' },
+                { id: 'THIS_YEAR' as PeriodFilter, label: 'Tahunan' },
+                { id: 'CUSTOM' as PeriodFilter, label: 'Rentang Khusus' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setPeriod(tab.id)}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                    period === tab.id
+                      ? 'bg-white text-blue-700 shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {period === 'CUSTOM' && (
+            <div className="flex items-center gap-3 pt-2 border-t border-slate-100 text-xs">
+              <span className="font-medium text-slate-600">Dari Tanggal:</span>
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-slate-800"
+              />
+              <span className="text-slate-400">s/d</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-slate-800"
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tabs: Ringkasan Per Barang vs Detail Transaksi vs Riwayat Upload */}
       <div className="flex items-center justify-between border-b border-slate-200">
@@ -470,6 +478,17 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
             <FileSpreadsheet className="w-3.5 h-3.5" />
             <span>Riwayat File Upload ({batches.length})</span>
           </button>
+          <button
+            onClick={() => setActiveTab('ANALYTICS')}
+            className={`pb-3 border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'ANALYTICS'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Analitik Fast/Slow Moving & Prediksi Habis</span>
+          </button>
         </div>
 
         {activeTab === 'DETAIL' && (
@@ -492,17 +511,19 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
         )}
       </div>
 
-      {/* Search Input */}
-      <div className="relative w-full sm:w-80">
-        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-        <input
-          type="text"
-          placeholder="Cari nama barang..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-hidden"
-        />
-      </div>
+      {/* Search Input (for Summary, Detail, Batches) */}
+      {activeTab !== 'ANALYTICS' && (
+        <div className="relative w-full sm:w-80">
+          <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Cari nama barang..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-hidden"
+          />
+        </div>
+      )}
 
       {/* TAB 1: SUMMARY REPORT TABLE */}
       {activeTab === 'SUMMARY' && (
@@ -821,6 +842,15 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
             </table>
           </div>
         </div>
+      )}
+
+      {/* TAB 4: ANALYTICS FAST-MOVING, DOI, DEAD STOCK */}
+      {activeTab === 'ANALYTICS' && (
+        <StockAnalyticsPanel
+          products={products}
+          transactions={transactions}
+          onNavigateToRestock={onNavigateToRestock}
+        />
       )}
 
       {/* Batch Detail Modal */}

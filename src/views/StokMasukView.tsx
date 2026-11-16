@@ -32,6 +32,7 @@ import {
   Check,
 } from 'lucide-react';
 import { exportToExcel, exportToCSV } from '../utils/exportImport';
+import { ProductCombobox } from '../components/ProductCombobox';
 
 interface StokMasukViewProps {
   products: Product[];
@@ -633,33 +634,29 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
                 </button>
               </div>
 
-              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              <div className="space-y-2.5">
                 {items.map((it, idx) => {
                   const selectedProd = products.find((p) => p.id === it.productId);
                   return (
                     <div
                       key={idx}
-                      className="flex items-center gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200"
+                      className="flex items-start gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 relative transition-all"
+                      style={{ zIndex: (items.length - idx) * 5 + 10 }}
                     >
                       <div className="flex-1 min-w-0">
-                        <select
+                        <ProductCombobox
                           required
+                          products={activeProducts}
                           value={it.productId}
-                          onChange={(e) => handleItemChange(idx, 'productId', e.target.value)}
-                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:outline-hidden text-slate-800"
-                        >
-                          <option value="">-- Pilih Barang --</option>
-                          {activeProducts.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} (Stok: {p.currentStock})
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => handleItemChange(idx, 'productId', val)}
+                          placeholder="Ketik nama barang / SKU..."
+                          stockPrefix="Stok"
+                        />
                         {selectedProd && (
-                          <p className="text-[10px] text-slate-500 mt-0.5">
-                            Stok berjalan saat ini: {selectedProd.currentStock} &rarr; Setelah masuk:{' '}
-                            <span className="font-bold text-emerald-600">
-                              {selectedProd.currentStock + (Number(it.qty) || 0)}
+                          <p className="text-[10px] text-slate-500 mt-1 pl-1">
+                            Stok saat ini: <strong className="text-slate-700">{selectedProd.currentStock}</strong> &rarr; Setelah masuk:{' '}
+                            <span className="font-bold text-emerald-600 font-mono">
+                              {selectedProd.currentStock + (Number(it.qty) || 0)} unit
                             </span>
                           </p>
                         )}
@@ -675,7 +672,7 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
                           onChange={(e) =>
                             handleItemChange(idx, 'qty', Math.max(1, Number(e.target.value)))
                           }
-                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-right focus:outline-hidden"
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-right focus:outline-hidden focus:border-blue-500 text-slate-800"
                         />
                       </div>
 
@@ -683,7 +680,8 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
                         <button
                           type="button"
                           onClick={() => handleRemoveItem(idx)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors mt-0.5"
+                          title="Hapus baris ini"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1261,19 +1259,14 @@ export const StokMasukView: React.FC<StokMasukViewProps> = ({
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Pilih Barang <span className="text-rose-500">*</span>
                 </label>
-                <select
+                <ProductCombobox
                   required
+                  products={products}
                   value={editProductId}
-                  onChange={(e) => setEditProductId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-hidden focus:border-blue-500 font-medium text-slate-800"
-                >
-                  <option value="">-- Pilih Barang --</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} (Stok Saat Ini: {p.currentStock})
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setEditProductId(val)}
+                  placeholder="Ketik nama barang untuk mencari..."
+                  stockPrefix="Stok gudang"
+                />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

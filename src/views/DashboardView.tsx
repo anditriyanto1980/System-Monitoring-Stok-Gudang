@@ -24,13 +24,16 @@ import {
   RefreshCw,
   LogIn,
   ShieldAlert,
+  TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { StockAnalyticsPanel } from '../components/StockAnalyticsPanel';
 
 interface DashboardViewProps {
   products: Product[];
   transactions: StockTransaction[];
   onNavigateTab: (tab: any) => void;
+  onNavigateToRestock?: (productId: string) => void;
   onRefreshData: () => void;
 }
 
@@ -38,9 +41,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   products,
   transactions,
   onNavigateTab,
+  onNavigateToRestock,
   onRefreshData,
 }) => {
   const { user, openLoginModal } = useAuth();
+  const [dashboardMode, setDashboardMode] = useState<'OVERVIEW' | 'ANALYTICS'>('OVERVIEW');
   const [period, setPeriod] = useState<PeriodFilter>('TODAY');
   const [customStart, setCustomStart] = useState<string>(getTodayWIB());
   const [customEnd, setCustomEnd] = useState<string>(getTodayWIB());
@@ -143,71 +148,125 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       )}
 
-      {/* Top Banner & Period Filter */}
-      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold text-slate-800">Ringkasan Gudang</h2>
-            <button
-              onClick={onRefreshData}
-              title="Perbarui Data"
-              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+      {/* Top Banner & View Switcher */}
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-slate-800">
+                {dashboardMode === 'OVERVIEW'
+                  ? 'Ringkasan Gudang'
+                  : 'Analitik Produk & Prediksi Stok'}
+              </h2>
+              <button
+                onClick={onRefreshData}
+                title="Perbarui Data"
+                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {dashboardMode === 'OVERVIEW' ? (
+                <>
+                  Periode aktif: <span className="font-semibold text-blue-600">{dateRange.label}</span>
+                </>
+              ) : (
+                'Top 10 Produk Terlaris per Channel · Estimasi Habis Stok · Dead Stock Alert (30/60/90 Hari)'
+              )}
+            </p>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Periode aktif: <span className="font-semibold text-blue-600">{dateRange.label}</span>
-          </p>
+
+          {/* Segmented Mode Switcher: Ringkasan vs Analitik */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/60 text-xs">
+              <button
+                type="button"
+                onClick={() => setDashboardMode('OVERVIEW')}
+                className={`px-3.5 py-1.5 rounded-lg font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                  dashboardMode === 'OVERVIEW'
+                    ? 'bg-white text-slate-900 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Ringkasan Operasional
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardMode('ANALYTICS')}
+                className={`px-3.5 py-1.5 rounded-lg font-medium transition-all whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 cursor-pointer ${
+                  dashboardMode === 'ANALYTICS'
+                    ? 'bg-white text-blue-700 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <TrendingUp className="w-3.5 h-3.5" />
+                <span>Analitik Fast-Moving & Dead Stock</span>
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* Period Selector Tabs */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200/60 text-xs">
-          {[
-            { id: 'TODAY' as PeriodFilter, label: 'Hari Ini' },
-            { id: 'YESTERDAY' as PeriodFilter, label: 'Kemarin' },
-            { id: 'THIS_WEEK' as PeriodFilter, label: 'Minggu Ini' },
-            { id: 'THIS_MONTH' as PeriodFilter, label: 'Bulan Ini' },
-            { id: 'THIS_YEAR' as PeriodFilter, label: 'Tahun Ini' },
-            { id: 'CUSTOM' as PeriodFilter, label: 'Kustom' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setPeriod(tab.id)}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                period === tab.id
-                  ? 'bg-white text-blue-700 shadow-xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {/* Period Selector Tabs (shown on Overview mode) */}
+        {dashboardMode === 'OVERVIEW' && (
+          <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs font-medium text-slate-500">Filter Periode Pergerakan:</span>
+            <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200/60 text-xs">
+              {[
+                { id: 'TODAY' as PeriodFilter, label: 'Hari Ini' },
+                { id: 'YESTERDAY' as PeriodFilter, label: 'Kemarin' },
+                { id: 'THIS_WEEK' as PeriodFilter, label: 'Minggu Ini' },
+                { id: 'THIS_MONTH' as PeriodFilter, label: 'Bulan Ini' },
+                { id: 'THIS_YEAR' as PeriodFilter, label: 'Tahun Ini' },
+                { id: 'CUSTOM' as PeriodFilter, label: 'Kustom' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setPeriod(tab.id)}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                    period === tab.id
+                      ? 'bg-white text-blue-700 shadow-xs font-semibold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Custom Date Range Picker when CUSTOM selected */}
-      {period === 'CUSTOM' && (
-        <div className="flex items-center gap-3 p-4 bg-blue-50/60 border border-blue-200 rounded-xl text-xs">
-          <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
-          <span className="font-medium text-slate-700">Pilih Rentang Tanggal:</span>
-          <input
-            type="date"
-            value={customStart}
-            onChange={(e) => setCustomStart(e.target.value)}
-            className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800"
-          />
-          <span className="text-slate-400">s/d</span>
-          <input
-            type="date"
-            value={customEnd}
-            onChange={(e) => setCustomEnd(e.target.value)}
-            className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800"
-          />
-        </div>
-      )}
+      {dashboardMode === 'ANALYTICS' ? (
+        <StockAnalyticsPanel
+          products={products}
+          transactions={transactions}
+          onNavigateToRestock={onNavigateToRestock}
+        />
+      ) : (
+        <>
+          {/* Custom Date Range Picker when CUSTOM selected */}
+          {period === 'CUSTOM' && (
+            <div className="flex items-center gap-3 p-4 bg-blue-50/60 border border-blue-200 rounded-xl text-xs">
+              <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+              <span className="font-medium text-slate-700">Pilih Rentang Tanggal:</span>
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800"
+              />
+              <span className="text-slate-400">s/d</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800"
+              />
+            </div>
+          )}
 
-      {/* Primary KPI Cards (7 Metrics) */}
+          {/* Primary KPI Cards (7 Metrics) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* 1. Total SKU */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
@@ -557,6 +616,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };
