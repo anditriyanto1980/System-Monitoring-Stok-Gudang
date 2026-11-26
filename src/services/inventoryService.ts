@@ -1211,6 +1211,313 @@ export async function deleteSingleImportBatch(batchId: string): Promise<number> 
   }
 }
 
+export interface EditBatchItemInput {
+  id?: string;
+  productId: string;
+  qty: number;
+  referenceNo?: string;
+  notes?: string;
+}
+
+/**
+ * Fast-path update for batch metadata only (transactionDate and fileName).
+ * Updates import_batches/{batchId} and syncs date on all transactions in that batch.
+ */
+export async function updateImportBatchMetadata(
+  batchId: string,
+  newDate: string,
+  newFileName: string
+): Promise<{ updatedTxCount: number }> {
+  const cleanDate = newDate.trim();
+  const cleanFileName = newFileName.trim();
+
+  if (!cleanDate || cleanDate.length > 32) {
+    throw new Error('Tanggal transaksi tidak valid.');
+  }
+  if (!cleanFileName || cleanFileName.length > 200) {
+    throw new Error('Nama file harus diisi (maksimal 200 karakter).');
+  }
+
+  try {
+    const batchRef = doc(db, 'import_batches', batchId);
+    const batchSnap = await getDoc(batchRef);
+    if (!batchSnap.exists()) {
+      throw new Error('Data batch tidak ditemukan di sistem.');
+    }
+
+    const existingBatch = batchSnap.data() as ImportBatch;
+    const existingTx = await getTransactionsByBatchId(batchId);
+
+    // Update date on all transactions belonging to this batch if date changed
+    if (existingBatch.transactionDate !== cleanDate && existingTx.length > 0) {
+      const CHUNK_SIZE = 400;
+      for (let i = 0; i < existingTx.length; i += CHUNK_SIZE) {
+        const chunk = existingTx.slice(i, i + CHUNK_SIZE);
+        const wb = writeBatch(db);
+        for (const tx of chunk) {
+          wb.update(doc(db, 'transactions', tx.id), {
+            date: cleanDate,
+          });
+        }
+        await wb.commit();
+      }
+    }
+
+    await updateDoc(batchRef, {
+      transactionDate: cleanDate,
+      fileName: cleanFileName,
+    });
+
+    return { updatedTxCount: existingTx.length };
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.WRITE, `import_batches/${batchId}`);
+    throw err;
+  }
+}
+
+/**
+ * Full update for an imported sales batch (metadata + item edits/additions/deletions).
+ * Automatically calculates net stock deltas, validates non-negative stock, updates products,
+ * syncs transactions in chunked batches, and updates the import_batches summary document.
+ */
+export async function updateImportBatchFull(
+  batchId: string,
+  newDate: string,
+  newFileName: string,
+  editedRows: EditBatchItemInput[],
+  userEmail: string
+): Promise<{ itemCount: number; totalQty: number; affectedProductsCount: number }> {
+  const cleanDate = newDate.trim();
+  const cleanFileName = newFileName.trim();
+
+  if (!cleanDate || cleanDate.length > 32) {
+    throw new Error('Tanggal transaksi tidak valid.');
+  }
+  if (!cleanFileName || cleanFileName.length > 200) {
+    throw new Error('Nama file harus diisi (maksimal 200 karakter).');
+  }
+  if (!editedRows || editedRows.length === 0) {
+    throw new Error('Minimal harus ada 1 item barang dalam batch. Gunakan fitur Hapus Batch jika ingin membatalkan seluruh batch.');
+  }
+
+  for (let i = 0; i < editedRows.length; i++) {
+    const row = editedRows[i];
+    if (!row.productId) {
+      throw new Error(`Baris ke-${i + 1} belum memilih produk.`);
+    }
+    if (!Number.isFinite(row.qty) || row.qty <= 0) {
+      throw new Error(`Qty pada baris ke-${i + 1} harus lebih besar dari 0.`);
+    }
+  }
+
+  try {
+    const batchRef = doc(db, 'import_batches', batchId);
+    const [batchSnap, existingTx, allProducts] = await Promise.all([
+      getDoc(batchRef),
+      getTransactionsByBatchId(batchId),
+      getAllProducts(),
+    ]);
+
+    if (!batchSnap.exists()) {
+      throw new Error('Data batch tidak ditemukan di sistem.');
+    }
+
+    const batchData = batchSnap.data() as ImportBatch;
+    const productMap = new Map<string, Product>((allProducts || []).map((p) => [p.id, p]));
+
+    // Validate all selected products exist
+    for (const row of editedRows) {
+      if (!productMap.has(row.productId)) {
+        throw new Error(`Produk dengan ID "${row.productId}" tidak ditemukan di Master Barang.`);
+      }
+    }
+
+    // Calculate old vs new deducted qty per product
+    const oldQtyByProduct = new Map<string, number>();
+    for (const tx of existingTx) {
+      if (tx.direction === 'OUT') {
+        oldQtyByProduct.set(tx.productId, (oldQtyByProduct.get(tx.productId) || 0) + tx.qty);
+      }
+    }
+
+    const newQtyByProduct = new Map<string, number>();
+    for (const row of editedRows) {
+      const cleanQty = Math.round(row.qty);
+      newQtyByProduct.set(row.productId, (newQtyByProduct.get(row.productId) || 0) + cleanQty);
+    }
+
+    // Collect all affected products and validate no stock goes negative
+    const allAffectedProductIds = new Set<string>([
+      ...oldQtyByProduct.keys(),
+      ...newQtyByProduct.keys(),
+    ]);
+
+    const finalStockMap = new Map<string, number>();
+    const productsToUpdate: Array<{ id: string; newStock: number }> = [];
+
+    for (const pid of allAffectedProductIds) {
+      const prod = productMap.get(pid);
+      if (!prod) continue;
+
+      const oldQty = oldQtyByProduct.get(pid) || 0;
+      const newQty = newQtyByProduct.get(pid) || 0;
+      const availableStock = prod.currentStock + oldQty;
+
+      if (availableStock < newQty) {
+        throw new Error(
+          `Stok barang "${prod.name}" tidak mencukupi! ` +
+            `Stok tersedia (termasuk alokasi batch lama): ${availableStock}, ` +
+            `total dibutuhkan setelah edit: ${newQty}.`
+        );
+      }
+
+      const finalStock = availableStock - newQty;
+      finalStockMap.set(pid, finalStock);
+
+      if (finalStock !== prod.currentStock) {
+        productsToUpdate.push({ id: pid, newStock: finalStock });
+      }
+    }
+
+    // Determine transaction type & source based on platform
+    let txType: TransactionType = 'KELUAR_PENJUALAN';
+    let txSource: TransactionSource = 'PENJUALAN_LAIN';
+    const upperPlatform = (batchData.platform || '').toUpperCase();
+    if (upperPlatform === 'SHOPEE') {
+      txType = 'KELUAR_SHOPEE';
+      txSource = 'SHOPEE';
+    } else if (upperPlatform === 'TIKTOK') {
+      txType = 'KELUAR_TIKTOK';
+      txSource = 'TIKTOK';
+    }
+
+    const now = new Date().toISOString();
+    const existingTxMap = new Map<string, StockTransaction>(existingTx.map((t) => [t.id, t]));
+    const keptTxIds = new Set<string>();
+
+    // Prepare chunked Firestore operations
+    type BatchOp =
+      | { kind: 'updateProduct'; id: string; newStock: number }
+      | { kind: 'updateTx'; id: string; data: Partial<StockTransaction> }
+      | { kind: 'setTx'; id: string; data: StockTransaction }
+      | { kind: 'deleteTx'; id: string };
+
+    const ops: BatchOp[] = [];
+
+    // 1. Product stock updates
+    for (const pUpd of productsToUpdate) {
+      ops.push({ kind: 'updateProduct', id: pUpd.id, newStock: pUpd.newStock });
+    }
+
+    // 2. Transaction updates and creations
+    let grandTotalQty = 0;
+    for (const row of editedRows) {
+      const cleanQty = Math.round(row.qty);
+      grandTotalQty += cleanQty;
+
+      const prod = productMap.get(row.productId)!;
+      const refNo = (row.referenceNo || '').trim() || batchId;
+      const cleanNotes =
+        (row.notes || '').trim() ||
+        `Upload Penjualan ${batchData.platform}${refNo && refNo !== batchId ? ` (Pesanan: ${refNo})` : ''}`;
+      const balAfter = finalStockMap.get(row.productId) ?? prod.currentStock;
+
+      if (row.id && existingTxMap.has(row.id)) {
+        keptTxIds.add(row.id);
+        const orig = existingTxMap.get(row.id)!;
+        const hasRowChanged =
+          orig.productId !== row.productId ||
+          orig.productName !== prod.name ||
+          orig.qty !== cleanQty ||
+          orig.date !== cleanDate ||
+          (orig.referenceNo || '') !== refNo ||
+          (orig.notes || '') !== cleanNotes;
+
+        if (hasRowChanged) {
+          ops.push({
+            kind: 'updateTx',
+            id: orig.id,
+            data: {
+              productId: row.productId,
+              productName: prod.name,
+              qty: cleanQty,
+              date: cleanDate,
+              referenceNo: refNo,
+              notes: cleanNotes,
+              balanceAfter: balAfter,
+            },
+          });
+        }
+      } else {
+        const newTxId = generateId(`TX-OUT-${upperPlatform.substring(0, 3) || 'SLS'}`);
+        const newTxDoc: StockTransaction = {
+          id: newTxId,
+          productId: row.productId,
+          productName: prod.name,
+          type: txType,
+          qty: cleanQty,
+          direction: 'OUT',
+          balanceAfter: balAfter,
+          date: cleanDate,
+          referenceNo: refNo,
+          notes: cleanNotes,
+          source: txSource,
+          batchId,
+          createdBy: userEmail,
+          createdAt: now,
+        };
+        ops.push({ kind: 'setTx', id: newTxId, data: newTxDoc });
+      }
+    }
+
+    // 3. Transaction deletions
+    for (const orig of existingTx) {
+      if (!keptTxIds.has(orig.id)) {
+        ops.push({ kind: 'deleteTx', id: orig.id });
+      }
+    }
+
+    // Commit all operations in safe chunks of 400
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
+      const chunk = ops.slice(i, i + CHUNK_SIZE);
+      const wb = writeBatch(db);
+      for (const op of chunk) {
+        if (op.kind === 'updateProduct') {
+          wb.update(doc(db, 'products', op.id), {
+            currentStock: op.newStock,
+            updatedAt: now,
+          });
+        } else if (op.kind === 'updateTx') {
+          wb.update(doc(db, 'transactions', op.id), op.data);
+        } else if (op.kind === 'setTx') {
+          wb.set(doc(db, 'transactions', op.id), op.data);
+        } else if (op.kind === 'deleteTx') {
+          wb.delete(doc(db, 'transactions', op.id));
+        }
+      }
+      await wb.commit();
+    }
+
+    // 4. Update batch summary document
+    await updateDoc(batchRef, {
+      transactionDate: cleanDate,
+      fileName: cleanFileName,
+      itemCount: editedRows.length,
+      totalQty: grandTotalQty,
+    });
+
+    return {
+      itemCount: editedRows.length,
+      totalQty: grandTotalQty,
+      affectedProductsCount: productsToUpdate.length,
+    };
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.WRITE, `import_batches/${batchId}`);
+    throw err;
+  }
+}
+
 
 /**
  * -------------------------------------------------------------

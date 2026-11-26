@@ -23,10 +23,12 @@ import {
   Printer,
   Boxes,
   Eye,
+  Edit3,
   ShoppingBag,
   TrendingUp,
 } from 'lucide-react';
 import { BatchDetailModal } from '../components/BatchDetailModal';
+import { BatchEditModal } from '../components/BatchEditModal';
 import { StockAnalyticsPanel } from '../components/StockAnalyticsPanel';
 
 interface LaporanStokViewProps {
@@ -51,6 +53,7 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
   const [activeTab, setActiveTab] = useState<'SUMMARY' | 'DETAIL' | 'BATCHES' | 'ANALYTICS'>('SUMMARY');
   const [marketplaceFilter, setMarketplaceFilter] = useState<string>('ALL');
   const [selectedBatchForDetail, setSelectedBatchForDetail] = useState<ImportBatch | null>(null);
+  const [batchToEdit, setBatchToEdit] = useState<ImportBatch | null>(null);
 
   // Compute Active Date Range
   const dateRange = useMemo(() => {
@@ -825,15 +828,26 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
                           {b.createdBy}
                         </td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedBatchForDetail(b)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
-                            title="Lihat rincian data dan cek ulang pesanan"
-                          >
-                            <Eye className="w-3.5 h-3.5 text-blue-600" />
-                            <span>Lihat Data</span>
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedBatchForDetail(b)}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
+                              title="Lihat rincian data dan cek ulang pesanan"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-blue-600" />
+                              <span>Lihat</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBatchToEdit(b)}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
+                              title="Edit tanggal transaksi, nama file, atau item dalam batch ini"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Edit</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -860,6 +874,21 @@ export const LaporanStokView: React.FC<LaporanStokViewProps> = ({
           allTransactions={transactions}
           products={products}
           onClose={() => setSelectedBatchForDetail(null)}
+          onEditBatch={(b) => {
+            setSelectedBatchForDetail(null);
+            setBatchToEdit(b);
+          }}
+        />
+      )}
+
+      {/* Batch Edit Modal */}
+      {batchToEdit && (
+        <BatchEditModal
+          batch={batchToEdit}
+          allTransactions={transactions}
+          products={products}
+          onClose={() => setBatchToEdit(null)}
+          onSaved={onRefreshData}
         />
       )}
     </div>

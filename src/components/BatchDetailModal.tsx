@@ -21,6 +21,7 @@ import {
   ArrowUpRight,
   TrendingDown,
   Info,
+  Edit3,
 } from 'lucide-react';
 
 interface BatchDetailModalProps {
@@ -28,6 +29,7 @@ interface BatchDetailModalProps {
   allTransactions: StockTransaction[];
   products: Product[];
   onClose: () => void;
+  onEditBatch?: (batch: ImportBatch) => void;
   onDeleteBatch?: (batch: ImportBatch) => void;
 }
 
@@ -44,6 +46,7 @@ export const BatchDetailModal: React.FC<BatchDetailModalProps> = ({
   allTransactions,
   products,
   onClose,
+  onEditBatch,
   onDeleteBatch,
 }) => {
   const [activeTab, setActiveTab] = useState<'SUMMARY' | 'DETAIL'>('SUMMARY');
@@ -269,11 +272,22 @@ export const BatchDetailModal: React.FC<BatchDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-end sm:self-center">
+            {onEditBatch && (
+              <button
+                type="button"
+                onClick={() => onEditBatch(batch)}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="Edit tanggal transaksi, nama file, atau rincian item batch ini"
+              >
+                <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                <span>Edit Batch</span>
+              </button>
+            )}
             {onDeleteBatch && (
               <button
                 type="button"
                 onClick={() => onDeleteBatch(batch)}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors flex items-center gap-1.5 cursor-pointer"
                 title="Hapus batch ini dan kembalikan stok fisik ke gudang"
               >
                 <Trash2 className="w-3.5 h-3.5 text-rose-600" />

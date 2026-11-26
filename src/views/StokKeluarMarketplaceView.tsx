@@ -41,8 +41,10 @@ import {
   Loader2,
   X,
   Eye,
+  Edit3,
 } from 'lucide-react';
 import { BatchDetailModal } from '../components/BatchDetailModal';
+import { BatchEditModal } from '../components/BatchEditModal';
 
 interface StokKeluarMarketplaceViewProps {
   products: Product[];
@@ -78,6 +80,7 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
   const [isDeletingReport, setIsDeletingReport] = useState<boolean>(false);
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
   const [batchToDelete, setBatchToDelete] = useState<ImportBatch | null>(null);
+  const [batchToEdit, setBatchToEdit] = useState<ImportBatch | null>(null);
   const [selectedBatchForDetail, setSelectedBatchForDetail] = useState<ImportBatch | null>(null);
 
   // Active platform batches
@@ -860,7 +863,7 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
             </h3>
           </div>
           <span className="text-xs text-slate-500">
-            Total {platformBatches.length} batch import tersimpan &bull; Anda juga dapat menghapus batch spesifik di tabel
+            Total {platformBatches.length} batch import tersimpan &bull; Anda dapat melihat, mengedit, atau menghapus batch spesifik di tabel
           </span>
         </div>
 
@@ -920,20 +923,29 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
                         <button
                           type="button"
                           onClick={() => setSelectedBatchForDetail(b)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
                           title="Lihat rincian data dan cek ulang pesanan"
                         >
                           <Eye className="w-3.5 h-3.5 text-blue-600" />
-                          <span>Lihat Data</span>
+                          <span>Lihat</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBatchToEdit(b)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
+                          title="Edit tanggal transaksi, nama file, atau item pesanan dalam batch ini"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Edit</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => setBatchToDelete(b)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
-                          title="Hapus batch ini dan kembalikan stok ke gudang"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors touch-manipulation cursor-pointer"
+                          title="Hapus batch ini dan kembalikan stok ke gudang (Rollback)"
                         >
                           <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                          <span>Hapus & Rollback</span>
+                          <span>Hapus</span>
                         </button>
                       </div>
                     </td>
@@ -1126,10 +1138,25 @@ export const StokKeluarMarketplaceView: React.FC<StokKeluarMarketplaceViewProps>
           allTransactions={transactions}
           products={products}
           onClose={() => setSelectedBatchForDetail(null)}
+          onEditBatch={(b) => {
+            setSelectedBatchForDetail(null);
+            setBatchToEdit(b);
+          }}
           onDeleteBatch={(b) => {
             setSelectedBatchForDetail(null);
             setBatchToDelete(b);
           }}
+        />
+      )}
+
+      {/* Edit Modal: Edit batch date, fileName, and item details */}
+      {batchToEdit && (
+        <BatchEditModal
+          batch={batchToEdit}
+          allTransactions={transactions}
+          products={products}
+          onClose={() => setBatchToEdit(null)}
+          onSaved={onRefreshData}
         />
       )}
     </div>
