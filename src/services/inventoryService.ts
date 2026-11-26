@@ -122,23 +122,41 @@ export async function createProductManual(
   }
 }
 
+export interface UpdateProductStockOptions {
+  newStock?: number;
+  stockNote?: string;
+  userEmail?: string;
+}
+
 export async function updateProduct(
   productId: string,
   name: string,
   minStock?: number,
-  isActive?: boolean
-): Promise<void> {
+  isActive?: boolean,
+  stockOptions?: UpdateProductStockOptions
+): Promise<{ stockChanged: boolean; oldStock: number; newStock: number }> {
   const cleanName = name.trim().replace(/\s+/g, ' ');
   const normName = normalizeText(cleanName);
 
+  if (cleanName && cleanName.length > 200) {
+    throw new Error('Nama barang maksimal 200 karakter.');
+  }
+
+  const hasStockEdit = stockOptions && typeof stockOptions.newStock === 'number';
+  if (hasStockEdit) {
+    if (!Number.isFinite(stockOptions.newStock!) || stockOptions.newStock! < 0) {
+      throw new Error('Qty stok barang tidak boleh kurang dari 0.');
+    }
+  }
+
   const prodRef = doc(db, 'products', productId);
   try {
-    const snap = await getDoc(prodRef);
-    if (!snap.exists()) throw new Error('Barang tidak ditemukan.');
+    // Check duplicate name outside transaction if name is provided
+    const preSnap = await getDoc(prodRef);
+    if (!preSnap.exists()) throw new Error('Barang tidak ditemukan.');
 
-    const data = snap.data() as Product;
-    // Check duplicate if name changed
-    if (cleanName && normName !== data.normalizedName) {
+    const preData = preSnap.data() as Product;
+    if (cleanName && normName !== preData.normalizedName) {
       const all = await getAllProducts();
       const duplicate = all.find(p => p.id !== productId && p.normalizedName === normName);
       if (duplicate) {
@@ -146,17 +164,75 @@ export async function updateProduct(
       }
     }
 
-    const updates: Partial<Product> = {
-      name: cleanName || data.name,
-      normalizedName: cleanName ? normName : data.normalizedName,
-      updatedAt: new Date().toISOString(),
-    };
-    if (typeof minStock === 'number') updates.minStock = Math.max(0, minStock);
-    if (typeof isActive === 'boolean') updates.isActive = isActive;
+    let resultOldStock = preData.currentStock;
+    let resultNewStock = preData.currentStock;
+    let stockChanged = false;
 
-    await updateDoc(prodRef, updates);
+    const now = new Date().toISOString();
+    const today = getTodayWIB();
+
+    await runTransaction(db, async (txn) => {
+      const snap = await txn.get(prodRef);
+      if (!snap.exists()) throw new Error('Barang tidak ditemukan.');
+
+      const data = snap.data() as Product;
+      const finalName = cleanName || data.name;
+      const updates: Partial<Product> = {
+        name: finalName,
+        normalizedName: cleanName ? normName : data.normalizedName,
+        updatedAt: now,
+      };
+      if (typeof minStock === 'number') updates.minStock = Math.max(0, Math.round(minStock));
+      if (typeof isActive === 'boolean') updates.isActive = isActive;
+
+      resultOldStock = data.currentStock;
+      resultNewStock = data.currentStock;
+
+      if (hasStockEdit) {
+        const targetStock = Math.max(0, Math.round(stockOptions!.newStock!));
+        if (targetStock !== data.currentStock) {
+          updates.currentStock = targetStock;
+          resultNewStock = targetStock;
+          stockChanged = true;
+
+          const diff = targetStock - data.currentStock;
+          const diffLabel = `${diff > 0 ? '+' : ''}${diff}`;
+          const customNote = stockOptions?.stockNote?.trim();
+          const txNotes = customNote
+            ? `${customNote} (${data.currentStock} → ${targetStock}, selisih ${diffLabel})`
+            : `Edit qty manual di Master Barang: ${data.currentStock} → ${targetStock} (Selisih: ${diffLabel})`;
+
+          const txId = generateId('TX-ADJ');
+          const txDoc: StockTransaction = {
+            id: txId,
+            productId,
+            productName: finalName,
+            type: 'PENYESUAIAN_OPNAME',
+            qty: Math.abs(diff),
+            direction: 'ADJUST',
+            balanceAfter: targetStock,
+            date: today,
+            referenceNo: 'EDIT-MASTER',
+            notes: txNotes,
+            source: 'EDIT_MASTER',
+            createdBy: stockOptions?.userEmail || 'Staf Gudang',
+            createdAt: now,
+          };
+          txn.set(doc(db, 'transactions', txId), txDoc);
+        }
+      }
+
+      txn.update(prodRef, updates);
+    });
+
+    return {
+      stockChanged,
+      oldStock: resultOldStock,
+      newStock: resultNewStock,
+    };
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `products/${productId}`);
+    throw err;
   }
 }
 

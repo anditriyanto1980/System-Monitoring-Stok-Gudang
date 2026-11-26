@@ -30,6 +30,7 @@ import {
   CheckSquare,
   Square,
   MinusSquare,
+  Loader2,
 } from 'lucide-react';
 
 interface MasterBarangViewProps {
@@ -57,8 +58,15 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
   // Edit Modal State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editName, setEditName] = useState('');
+  const [editStock, setEditStock] = useState<string>('0');
+  const [editStockNote, setEditStockNote] = useState('');
   const [editMinStock, setEditMinStock] = useState<number>(0);
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+
+  // Inline Quick-Edit Qty State (directly on table row)
+  const [inlineQtyProductId, setInlineQtyProductId] = useState<string | null>(null);
+  const [inlineQtyValue, setInlineQtyValue] = useState<string>('');
+  const [isSavingInlineQty, setIsSavingInlineQty] = useState<boolean>(false);
 
   // Upload Modal State
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -268,7 +276,7 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
     }
   };
 
-  // Handle Edit
+  // Handle Edit Modal Save (name, qty stock, minStock)
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct) return;
@@ -282,21 +290,96 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
       return;
     }
 
+    const parsedStock = editStock.trim() === '' ? NaN : Number(editStock);
+    if (!Number.isFinite(parsedStock) || parsedStock < 0) {
+      showToast('error', 'Validasi Gagal', 'Qty stok fisik harus berupa angka 0 atau lebih.');
+      return;
+    }
+
+    const roundedStock = Math.round(parsedStock);
+
     try {
       setIsSubmittingEdit(true);
-      await updateProduct(
+      const res = await updateProduct(
         editingProduct.id,
         editName,
         Number(editMinStock) || 0,
-        editingProduct.isActive
+        editingProduct.isActive,
+        {
+          newStock: roundedStock,
+          stockNote: editStockNote.trim() || undefined,
+          userEmail: user.email || 'Staf Gudang',
+        }
       );
-      showToast('success', 'Data Diperbarui', `Barang "${editName}" berhasil diupdate.`);
+
+      if (res.stockChanged) {
+        const diff = res.newStock - res.oldStock;
+        showToast(
+          'success',
+          'Data & Stok Diperbarui',
+          `Barang "${editName}" diperbarui. Stok: ${res.oldStock.toLocaleString()} → ${res.newStock.toLocaleString()} (${diff > 0 ? '+' : ''}${diff} unit).`
+        );
+      } else {
+        showToast('success', 'Data Diperbarui', `Barang "${editName}" berhasil diupdate.`);
+      }
       setEditingProduct(null);
       await onRefreshData();
     } catch (err: any) {
       showToast('error', 'Gagal Memperbarui', err?.message || 'Terjadi kesalahan.');
     } finally {
       setIsSubmittingEdit(false);
+    }
+  };
+
+  // Start Inline Quick-Edit Qty
+  const handleStartInlineQty = (p: Product) => {
+    if (!user) {
+      showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk mengedit qty barang.');
+      openLoginModal();
+      return;
+    }
+    setInlineQtyProductId(p.id);
+    setInlineQtyValue(String(p.currentStock));
+  };
+
+  // Save Inline Quick-Edit Qty
+  const handleSaveInlineQty = async (p: Product) => {
+    if (!user) {
+      showToast('warning', 'Login Diperlukan', 'Silakan login dengan akun Google untuk mengedit qty barang.');
+      openLoginModal();
+      return;
+    }
+
+    const parsed = inlineQtyValue.trim() === '' ? NaN : Number(inlineQtyValue);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      showToast('error', 'Qty Tidak Valid', 'Qty stok barang harus berupa angka 0 atau lebih.');
+      return;
+    }
+
+    const targetStock = Math.round(parsed);
+    if (targetStock === p.currentStock) {
+      setInlineQtyProductId(null);
+      return;
+    }
+
+    try {
+      setIsSavingInlineQty(true);
+      const res = await updateProduct(p.id, p.name, p.minStock, p.isActive, {
+        newStock: targetStock,
+        userEmail: user.email || 'Staf Gudang',
+      });
+      const diff = res.newStock - res.oldStock;
+      showToast(
+        'success',
+        'Qty Stok Diperbarui',
+        `"${p.name}": ${res.oldStock.toLocaleString()} → ${res.newStock.toLocaleString()} (${diff > 0 ? '+' : ''}${diff} unit).`
+      );
+      setInlineQtyProductId(null);
+      await onRefreshData();
+    } catch (err: any) {
+      showToast('error', 'Gagal Mengubah Qty', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSavingInlineQty(false);
     }
   };
 
@@ -567,8 +650,61 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
                         </span>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-right font-bold text-slate-900 text-sm">
-                      {p.currentStock.toLocaleString()}
+                    <td className="py-2.5 px-4 text-right">
+                      {inlineQtyProductId === p.id ? (
+                        <div className="inline-flex items-center justify-end gap-1">
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            autoFocus
+                            disabled={isSavingInlineQty}
+                            value={inlineQtyValue}
+                            onChange={(e) => setInlineQtyValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleSaveInlineQty(p);
+                              } else if (e.key === 'Escape') {
+                                setInlineQtyProductId(null);
+                              }
+                            }}
+                            className="w-24 px-2 py-1 text-right text-sm font-bold font-mono text-slate-900 bg-white border border-blue-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                          />
+                          <button
+                            type="button"
+                            disabled={isSavingInlineQty}
+                            onClick={() => handleSaveInlineQty(p)}
+                            className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                            title="Simpan qty baru"
+                          >
+                            {isSavingInlineQty ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Check className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isSavingInlineQty}
+                            onClick={() => setInlineQtyProductId(null)}
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors cursor-pointer"
+                            title="Batal"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleStartInlineQty(p)}
+                          className="group inline-flex items-center justify-end gap-1.5 px-2 py-1 rounded-lg font-bold text-slate-900 text-sm hover:bg-blue-50 hover:text-blue-700 transition-colors cursor-pointer"
+                          title="Klik untuk edit cepat qty stok fisik"
+                        >
+                          <span>{p.currentStock.toLocaleString()}</span>
+                          <Edit2 className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center text-slate-500">
                       {p.minStock ? p.minStock.toLocaleString() : '-'}
@@ -590,10 +726,12 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
                         onClick={() => {
                           setEditingProduct(p);
                           setEditName(p.name);
+                          setEditStock(String(p.currentStock));
+                          setEditStockNote('');
                           setEditMinStock(p.minStock || 0);
                         }}
-                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="Edit Barang"
+                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                        title="Edit Barang & Qty Stok"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -727,6 +865,66 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
               </div>
 
               <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Stok Fisik Saat Ini (Qty) <span className="text-rose-500">*</span>
+                  </label>
+                  {(() => {
+                    const parsed = editStock.trim() === '' ? NaN : Math.round(Number(editStock));
+                    if (!Number.isFinite(parsed) || parsed === editingProduct.currentStock) {
+                      return (
+                        <span className="text-[11px] text-slate-400">
+                          Saat ini: <strong>{editingProduct.currentStock.toLocaleString()}</strong> unit
+                        </span>
+                      );
+                    }
+                    const diff = parsed - editingProduct.currentStock;
+                    return (
+                      <span
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                          diff > 0
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border border-rose-200'
+                        }`}
+                      >
+                        {editingProduct.currentStock.toLocaleString()} → {parsed.toLocaleString()} ({diff > 0 ? `+${diff}` : diff})
+                      </span>
+                    );
+                  })()}
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  required
+                  value={editStock}
+                  onChange={(e) => setEditStock(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:border-blue-500 text-slate-900"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Jika qty diubah, sistem otomatis mencatat riwayat penyesuaian stok agar laporan tetap akurat.
+                </p>
+              </div>
+
+              {editStock.trim() !== '' &&
+                Number.isFinite(Number(editStock)) &&
+                Math.round(Number(editStock)) !== editingProduct.currentStock && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Catatan Penyesuaian Qty (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={160}
+                      placeholder="Contoh: Koreksi hitung fisik gudang"
+                      value={editStockNote}
+                      onChange={(e) => setEditStockNote(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-amber-50/50 border border-amber-300 rounded-xl focus:bg-white focus:outline-hidden focus:border-amber-500 text-slate-800"
+                    />
+                  </div>
+                )}
+
+              <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Batas Stok Minimum
                 </label>
@@ -737,11 +935,6 @@ export const MasterBarangView: React.FC<MasterBarangViewProps> = ({
                   onChange={(e) => setEditMinStock(Number(e.target.value))}
                   className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:border-blue-500 text-slate-800"
                 />
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-600">
-                Stok fisik saat ini: <strong>{editingProduct.currentStock}</strong> unit.
-                (Stok berjalan hanya dapat diubah melalui Stok Masuk, Keluar, atau Stok Opname).
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
